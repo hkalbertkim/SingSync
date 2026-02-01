@@ -34,3 +34,10 @@ web_flow_map.txt
 *_map.txt.zip
 server_songs_map.txt
 web_flow_map.txt
+
+# Next.js build artifacts
+web/.next
+web/node_modules
+
+# (optional) Next.js logs / cache
+web/.turbo
