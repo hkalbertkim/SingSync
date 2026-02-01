@@ -16,3 +16,21 @@ web/public/karaoke/*
 
 # Optional local data
 .env
+
+# Large dev-only analysis outputs
+*_map.txt
+*_map.txt.zip
+server_songs_map.txt
+web_flow_map.txt
+
+# Large dev-only analysis outputs
+*_map.txt
+*_map.txt.zip
+server_songs_map.txt
+web_flow_map.txt
+
+# Dev-only large analysis outputs
+*_map.txt
+*_map.txt.zip
+server_songs_map.txt
+web_flow_map.txt
