@@ -2,6 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/$/, "");
+
+function apiUrl(path: string): string {
+  if (!path.startsWith("/")) return path;
+  return API_BASE ? `${API_BASE}${path}` : path;
+}
+
 type Song = {
   id: string;
   title: string;
@@ -169,7 +176,7 @@ export default function Page() {
 
   // fetch songs (local playlist)
   useEffect(() => {
-    fetch("http://localhost:4000/api/songs", { cache: "no-store" })
+    fetch(apiUrl("/api/songs"), { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => setSongs(Array.isArray(d) ? d : []))
       .catch(() => setSongs([]));
@@ -179,7 +186,7 @@ export default function Page() {
   const refreshRecent = async () => {
     setRecentLoading(true);
     try {
-      const r = await fetch("http://localhost:4000/api/activity/recent?limit=12", { cache: "no-store" });
+      const r = await fetch(apiUrl("/api/activity/recent?limit=12"), { cache: "no-store" });
       const data = await r.json();
       setRecent(Array.isArray(data.items) ? data.items : []);
     } catch {
@@ -245,7 +252,7 @@ export default function Page() {
     setPhase("selecting");
 
     try {
-      const res = await fetch(`http://localhost:4000/api/search?q=${encodeURIComponent(q.trim())}`);
+      const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(q.trim())}`));
       const data = await res.json();
       setYoutubeResults(data.results || []);
     } catch (error) {
@@ -271,7 +278,7 @@ export default function Page() {
     setPrep(0);
 
     try {
-      const res = await fetch("http://localhost:4000/api/prepare", {
+      const res = await fetch(apiUrl("/api/prepare"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -319,7 +326,7 @@ export default function Page() {
 
     const pollInterval = setInterval(async () => {
       try {
-        const res = await fetch(`http://localhost:4000/api/prepare/${jobId}/status`);
+        const res = await fetch(apiUrl(`/api/prepare/${jobId}/status`));
         const status: JobStatus = await res.json();
         setJobStatus(status);
 
@@ -374,11 +381,9 @@ export default function Page() {
     const vox = vocalsRef.current;
     if (!inst || !vox) return;
 
-    const instUrl = jobStatus?.result?.instrumentalUrl
-      ? `http://localhost:4000${jobStatus.result.instrumentalUrl}`
-      : null;
+    const instUrl = jobStatus?.result?.instrumentalUrl ? apiUrl(jobStatus.result.instrumentalUrl) : null;
 
-    const voxUrl = jobStatus?.result?.vocalsUrl ? `http://localhost:4000${jobStatus.result.vocalsUrl}` : null;
+    const voxUrl = jobStatus?.result?.vocalsUrl ? apiUrl(jobStatus.result.vocalsUrl) : null;
 
     // fallback for local playlist (mp4 has audio)
     if (!instUrl) {
@@ -443,7 +448,7 @@ export default function Page() {
     setYtLyricCandidates([]);
     setSelectedLyricCandidateId("");
 
-    fetch(`http://localhost:4000/api/lyrics?videoId=${encodeURIComponent(youtubeOverlayId)}`, {
+    fetch(apiUrl(`/api/lyrics?videoId=${encodeURIComponent(youtubeOverlayId)}`), {
       cache: "no-store",
     })
       .then((r) => r.json())

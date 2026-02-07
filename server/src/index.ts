@@ -11,6 +11,7 @@ import prepareRouter from "./routes/prepare.js";
 import lyricsRouter from "./routes/lyrics.js";
 
 const PORT = Number(process.env.PORT || 4000);
+const HOST = process.env.HOST || "0.0.0.0";
 
 const app = express();
 app.use(cors());
@@ -314,6 +315,6 @@ function broadcastScores() {
   });
 }
 
-httpServer.listen(PORT, () => {
-  console.log(`server listening on http://localhost:${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`server listening on http://${HOST}:${PORT}`);
 });
