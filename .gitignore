@@ -41,3 +41,11 @@ web/node_modules
 
 # (optional) Next.js logs / cache
 web/.turbo
+
+# Local runtime artifacts (do not push)
+.logs/
+.run/
+server/cache/
+server/.en
+server/server/
+server/src/services/.DS_Store

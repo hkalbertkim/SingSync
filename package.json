@@ -1,0 +1,10 @@
+{
+  "name": "singsync-root",
+  "private": true,
+  "scripts": {
+    "dev:all": "sh -c 'npm --prefix server run dev & npm --prefix web run dev & wait'",
+    "dev:up": "./scripts/dev-up.sh",
+    "dev:down": "./scripts/dev-down.sh",
+    "dev:status": "./scripts/dev-status.sh"
+  }
+}
