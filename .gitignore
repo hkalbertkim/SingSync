@@ -49,3 +49,7 @@ server/cache/
 server/.en
 server/server/
 server/src/services/.DS_Store
+
+# local large artifacts
+prepare_search.txt
+prepare_search.txt.zip
