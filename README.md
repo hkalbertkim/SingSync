@@ -347,5 +347,36 @@ If not, no amount of licensing, AI, or polish will save it.
 
 ---
 
+## AI-Assisted Development (Experimental)
+
+This repository supports an **AI-assisted development workflow** used by the maintainers to accelerate small, well-scoped tasks.
+
+The workflow is based on:
+- A structured issue template (Linear)
+- Strict development rules (`AGENT_RULES.md`)
+- Human-reviewed pull requests (no autonomous merges)
+
+### How it works (high level)
+
+1. Tasks are written as small, explicit issues with acceptance criteria
+2. An AI agent may pick a single task from the Todo queue
+3. The agent works on a dedicated branch
+4. All changes are submitted via a pull request
+5. A human reviews and merges the PR
+
+At no point does the agent:
+- push directly to `main`
+- merge its own work
+- bypass repository protections
+
+### Safety notes
+
+- Destructive actions are intentionally constrained
+- All production changes require human approval
+- This workflow is **experimental** and may change
+
+For details, see [`AGENT_RULES.md`](./AGENT_RULES.md).
+
+
 (End of Document)
 
