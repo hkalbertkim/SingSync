@@ -1,6 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import LyricsPicker from "../components/LyricsPicker";
+import {
+  findActiveLyricIndex,
+  parseLrc,
+  parseLyricsResponse,
+  type LyricLine,
+  type LyricsApiResponse,
+  type LyricsCandidateApi,
+  type LyricsMode,
+  type LyricsSource,
+} from "../lib/lyrics";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/$/, "");
 
@@ -18,10 +29,6 @@ type Song = {
   vocalsUrl?: string;
 };
 type Phase = "browse" | "selecting" | "preparing" | "countdown" | "singing" | "post_song";
-type LyricLine = { t: number; text: string };
-
-type LyricsSource = "idle" | "captions" | "catalog" | "catalog_aligned" | "stt" | "none";
-type LyricsMode = "timed" | "plain";
 
 interface YouTubeResult {
   videoId: string;
@@ -44,28 +51,6 @@ interface JobStatus {
   };
 }
 
-interface LyricsApiResponse {
-  videoId: string;
-  source: "captions" | "catalog" | "catalog_aligned" | "stt" | "none";
-  mode?: LyricsMode;
-  lines: LyricLine[];
-  plainLyrics?: string;
-  syncMethod?: "native" | "ai" | "none";
-  selectedCandidateId?: string;
-  candidates?: LyricsCandidateApi[];
-}
-
-interface LyricsCandidateApi {
-  id: string;
-  label: string;
-  source: "captions" | "catalog" | "catalog_aligned" | "stt" | "none";
-  mode: LyricsMode;
-  lines: LyricLine[];
-  plainLyrics?: string;
-  syncMethod?: "native" | "ai" | "none";
-  score?: number;
-}
-
 type RecentItem = {
   videoId: string;
   title: string;
@@ -74,27 +59,6 @@ type RecentItem = {
   vocalsUrl: string;
   preparedAt: string;
 };
-
-function parseLrc(text: string): LyricLine[] {
-  const out: LyricLine[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    const m = [...line.matchAll(/\[(\d+):(\d+)(?:\.(\d+))?\](.*)/g)];
-    for (const x of m) {
-      const t = Number(x[1]) * 60 + Number(x[2]) + (x[3] ? Number(x[3]) / 100 : 0);
-      out.push({ t, text: (x[4] ?? "").trim() });
-    }
-  }
-  return out.sort((a, b) => a.t - b.t);
-}
-
-function findIdx(lines: LyricLine[], t: number) {
-  let i = -1;
-  for (let k = 0; k < lines.length; k++) {
-    if (lines[k].t <= t) i = k;
-    else break;
-  }
-  return i;
-}
 
 function Card(props: { children: React.ReactNode }) {
   return (
@@ -454,62 +418,9 @@ export default function Page() {
       .then((r) => r.json())
       .then((data: LyricsApiResponse) => {
         if (cancelled) return;
-        const parsedCandidates = Array.isArray(data?.candidates)
-          ? data.candidates
-              .filter((c) => c && typeof c.id === "string" && typeof c.label === "string")
-              .map((c) => {
-                const lines = Array.isArray(c.lines)
-                  ? c.lines
-                      .filter((l) => l && Number.isFinite(Number(l.t)) && typeof l.text === "string")
-                      .map((l) => ({ t: Number(l.t), text: l.text }))
-                  : [];
-                return {
-                  id: c.id,
-                  label: c.label,
-                  source:
-                    c.source === "captions" ||
-                    c.source === "catalog" ||
-                    c.source === "catalog_aligned" ||
-                    c.source === "stt"
-                      ? c.source
-                      : "none",
-                  mode: c.mode === "plain" ? "plain" : "timed",
-                  lines,
-                  plainLyrics: typeof c.plainLyrics === "string" ? c.plainLyrics : "",
-                  syncMethod: c.syncMethod === "native" || c.syncMethod === "ai" ? c.syncMethod : "none",
-                  score: Number.isFinite(Number(c.score)) ? Number(c.score) : 0,
-                } as LyricsCandidateApi;
-              })
-          : [];
-
-        const fallback: LyricsCandidateApi = {
-          id: "default",
-          label: "Default",
-          source:
-            data?.source === "captions" ||
-            data?.source === "catalog" ||
-            data?.source === "catalog_aligned" ||
-            data?.source === "stt"
-              ? data.source
-              : "none",
-          mode: data?.mode === "plain" ? "plain" : "timed",
-          lines: Array.isArray(data?.lines)
-            ? data.lines
-                .filter((l) => l && Number.isFinite(Number(l.t)) && typeof l.text === "string")
-                .map((l) => ({ t: Number(l.t), text: l.text }))
-            : [],
-          plainLyrics: typeof data?.plainLyrics === "string" ? data.plainLyrics : "",
-          syncMethod: data?.syncMethod === "native" || data?.syncMethod === "ai" ? data.syncMethod : "none",
-          score: 0,
-        };
-
-        const finalCandidates = parsedCandidates.length > 0 ? parsedCandidates : [fallback];
+        const { candidates: finalCandidates, selectedId } = parseLyricsResponse(data);
         setYtLyricCandidates(finalCandidates);
-
-        const preferred = data?.selectedCandidateId || finalCandidates[0].id;
-        setSelectedLyricCandidateId(
-          finalCandidates.some((c) => c.id === preferred) ? preferred : finalCandidates[0].id
-        );
+        setSelectedLyricCandidateId(selectedId);
       })
       .catch(() => {
         if (cancelled) return;
@@ -549,7 +460,7 @@ export default function Page() {
 
     let raf = 0;
     const loop = () => {
-      setActive(findIdx(activeLyrics, inst.currentTime || 0));
+      setActive(findActiveLyricIndex(activeLyrics, inst.currentTime || 0));
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -1077,38 +988,12 @@ export default function Page() {
                   textAlign: "center",
                 }}
               >
-                {youtubeOverlayId && ytLyricCandidates.length > 1 && (
-                  <div
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      gap: 8,
-                      flexWrap: "wrap",
-                      justifyContent: "center",
-                      marginBottom: 10,
-                    }}
-                  >
-                    {ytLyricCandidates.map((c, idx) => (
-                      <button
-                        key={`lyric-candidate-${c.id}`}
-                        onClick={() => setSelectedLyricCandidateId(c.id)}
-                        style={{
-                          height: 30,
-                          padding: "0 10px",
-                          borderRadius: 10,
-                          border: "1px solid #2a2a35",
-                          background: selectedLyricCandidateId === c.id ? "#1a2b5a" : "#101018",
-                          color: "#f5f5f7",
-                          fontSize: 12,
-                          fontWeight: 800,
-                          cursor: "pointer",
-                        }}
-                        title={c.label}
-                      >
-                        {idx + 1}. {c.mode === "timed" ? "Synced" : "Full"} · {c.source}
-                      </button>
-                    ))}
-                  </div>
+                {youtubeOverlayId && (
+                  <LyricsPicker
+                    candidates={ytLyricCandidates}
+                    selectedId={selectedLyricCandidateId}
+                    onSelect={setSelectedLyricCandidateId}
+                  />
                 )}
 
                 {!lyricsEnabled ? (
