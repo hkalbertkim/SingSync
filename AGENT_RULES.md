@@ -146,4 +146,14 @@ At the end of each cycle/day, post a short Daily Brief to Linear:
 • What is blocked (one-liners)
 • Next suggested ticket (from "Now" only)
 
+## AI-Assisted Development (Experimental)
+
+This repository supports an experimental AI-assisted development workflow
+used by the maintainers for small, well-scoped tasks.
+
+All changes are proposed via pull requests and reviewed by a human.
+No automated agent merges directly to `main`.
+
+For operational rules and constraints, see [`AGENT_RULES.md`](./AGENT_RULES.md).
+
 End of rules.
