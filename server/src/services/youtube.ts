@@ -3,6 +3,38 @@ import https from "https";
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || "";
 const YOUTUBE_API_BASE = "www.googleapis.com";
 
+// --- In-memory search cache (HKA-66) ---
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const SEARCH_CACHE_MAX_SIZE = 100;
+
+interface CacheEntry {
+  results: YouTubeVideo[];
+  cachedAt: number;
+}
+
+const searchCache = new Map<string, CacheEntry>();
+
+function getCachedSearch(query: string): YouTubeVideo[] | null {
+  const key = query.toLowerCase().trim();
+  const entry = searchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > SEARCH_CACHE_TTL_MS) {
+    searchCache.delete(key);
+    return null;
+  }
+  return entry.results;
+}
+
+function setCachedSearch(query: string, results: YouTubeVideo[]): void {
+  const key = query.toLowerCase().trim();
+  // Evict oldest entries when cache is full
+  if (searchCache.size >= SEARCH_CACHE_MAX_SIZE) {
+    const oldest = searchCache.keys().next().value;
+    if (oldest !== undefined) searchCache.delete(oldest);
+  }
+  searchCache.set(key, { results, cachedAt: Date.now() });
+}
+
 export interface YouTubeVideo {
   videoId: string;
   title: string;
@@ -116,6 +148,14 @@ export async function searchYouTube(query: string): Promise<YouTubeVideo[]> {
     console.warn("YOUTUBE_API_KEY not set, returning mock data");
     return getMockResults(query);
   }
+
+  // Check cache first (HKA-66)
+  const cached = getCachedSearch(query);
+  if (cached) {
+    console.log(`[search-cache] HIT for "${query}" (${cached.length} results)`);
+    return cached;
+  }
+
   try {
     const searchPath = `/youtube/v3/search?part=snippet&type=video&maxResults=10&q=${encodeURIComponent(query)}&key=${YOUTUBE_API_KEY}`;
     const searchData = await makeRequest<{ items: YouTubeSearchItem[] }>(searchPath);
@@ -146,7 +186,10 @@ export async function searchYouTube(query: string): Promise<YouTubeVideo[]> {
       return a.__idx - b.__idx; // preserve API relevance order when score ties
     });
 
-    return ranked.map(({ __score: _score, __idx: _idx, ...video }) => video);
+    const results = ranked.map(({ __score: _score, __idx: _idx, ...video }) => video);
+    setCachedSearch(query, results);
+    console.log(`[search-cache] MISS for "${query}" – cached ${results.length} results`);
+    return results;
   } catch (error) {
     console.error("YouTube API error:", error);
     return getMockResults(query);
