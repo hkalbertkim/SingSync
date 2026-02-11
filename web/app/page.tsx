@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import LyricsPicker from "../components/LyricsPicker";
 import LyricsVotingPanel, { type CommunityCandidate } from "../components/LyricsVotingPanel";
 import {
   findActiveLyricIndex,
@@ -98,6 +97,13 @@ function setStoredChoice(key: string, value: string) {
   } catch {
     // ignore storage errors
   }
+}
+
+function shiftLyricLines(lines: LyricLine[], offsetSec: number): LyricLine[] {
+  return lines.map((line) => ({
+    t: Math.max(0, line.t + offsetSec),
+    text: line.text,
+  }));
 }
 
 function Card(props: { children: React.ReactNode }) {
@@ -484,6 +490,55 @@ export default function Page() {
       null
     );
   }, [youtubeOverlayId, ytLyricCandidates, selectedLyricCandidateId]);
+  const comparableLyricCandidates = useMemo(() => {
+    const timed = ytLyricCandidates.filter((c) => c.mode === "timed" && c.lines.length > 0);
+    if (timed.length === 0) return [] as LyricsCandidateApi[];
+    if (timed.length >= 3) return timed.slice(0, 3);
+
+    if (timed.length === 2) {
+      const base = timed[0];
+      return [
+        timed[0],
+        timed[1],
+        {
+          ...base,
+          id: `${base.id}__late_350`,
+          label: `${base.label} (+0.35s)`,
+          lines: shiftLyricLines(base.lines, 0.35),
+        },
+      ];
+    }
+
+    const base = timed[0];
+    return [
+      {
+        ...base,
+        id: `${base.id}__early_450`,
+        label: `${base.label} (-0.45s)`,
+        lines: shiftLyricLines(base.lines, -0.45),
+      },
+      {
+        ...base,
+        id: base.id,
+        label: `${base.label} (Base)`,
+        lines: base.lines,
+      },
+      {
+        ...base,
+        id: `${base.id}__late_450`,
+        label: `${base.label} (+0.45s)`,
+        lines: shiftLyricLines(base.lines, 0.45),
+      },
+    ];
+  }, [ytLyricCandidates]);
+  const selectedComparableCandidate = useMemo(() => {
+    if (!comparableLyricCandidates.length) return null;
+    return (
+      comparableLyricCandidates.find((c) => c.id === selectedLyricCandidateId) ||
+      comparableLyricCandidates[1] ||
+      comparableLyricCandidates[0]
+    );
+  }, [comparableLyricCandidates, selectedLyricCandidateId]);
   const localLyricsCandidateKey = useMemo(
     () => (youtubeOverlayId ? `singsync:lyrics:selected:${youtubeOverlayId}` : ""),
     [youtubeOverlayId],
@@ -494,17 +549,18 @@ export default function Page() {
   );
 
   useEffect(() => {
-    if (!selectedLyricCandidate) return;
-    const lines = Array.isArray(selectedLyricCandidate.lines)
-      ? selectedLyricCandidate.lines
+    const picked = selectedComparableCandidate || selectedLyricCandidate;
+    if (!picked) return;
+    const lines = Array.isArray(picked.lines)
+      ? picked.lines
           .filter((l) => l && Number.isFinite(Number(l.t)) && typeof l.text === "string")
           .map((l) => ({ t: Number(l.t), text: l.text }))
       : [];
     setYtLyrics(lines);
-    setYtLyricsSource(selectedLyricCandidate.source);
-    setYtLyricsMode(selectedLyricCandidate.mode === "plain" ? "plain" : "timed");
-    setYtPlainLyrics(typeof selectedLyricCandidate.plainLyrics === "string" ? selectedLyricCandidate.plainLyrics : "");
-  }, [selectedLyricCandidate]);
+    setYtLyricsSource(picked.source);
+    setYtLyricsMode(picked.mode === "plain" ? "plain" : "timed");
+    setYtPlainLyrics(typeof picked.plainLyrics === "string" ? picked.plainLyrics : "");
+  }, [selectedComparableCandidate, selectedLyricCandidate]);
 
   const activeLyrics = useMemo(() => {
     return youtubeOverlayId ? ytLyrics : lyrics;
@@ -803,7 +859,12 @@ export default function Page() {
         if (cancelled) return;
         const { candidates: finalCandidates, selectedId } = parseLyricsResponse(data);
         const storedId = localLyricsCandidateKey ? getStoredChoice(localLyricsCandidateKey) : "";
-        const restoredId = finalCandidates.some((c) => c.id === storedId) ? storedId : selectedId;
+        const baseSelectedId = finalCandidates.some((c) => c.id === storedId) ? storedId : selectedId;
+        const candidateWithOffset =
+          finalCandidates.length === 1 && storedId && storedId.startsWith(`${finalCandidates[0].id}__`)
+            ? storedId
+            : "";
+        const restoredId = candidateWithOffset || baseSelectedId;
         setYtLyricCandidates(finalCandidates);
         setSelectedLyricCandidateId(restoredId);
       })
@@ -1496,12 +1557,88 @@ export default function Page() {
                   textAlign: "center",
                 }}
               >
-                {youtubeOverlayId && (
-                  <LyricsPicker
-                    candidates={ytLyricCandidates}
-                    selectedId={selectedLyricCandidateId}
-                    onSelect={setSelectedLyricCandidateId}
-                  />
+                {youtubeOverlayId && comparableLyricCandidates.length > 0 && (
+                  <div style={{ width: "100%", display: "grid", gap: 10, marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Lyrics candidates (pick best sync)</div>
+                    <div style={{ display: "flex", gap: 8, width: "100%" }}>
+                      {comparableLyricCandidates.map((candidate, idx) => {
+                        const selected = selectedLyricCandidateId === candidate.id;
+                        const now = getPlaybackTime();
+                        const at = findActiveLyricIndex(candidate.lines, now);
+                        const p = at > 0 ? candidate.lines[at - 1]?.text || " " : " ";
+                        const c = at >= 0 ? candidate.lines[at]?.text || " " : candidate.lines[0]?.text || " ";
+                        const n =
+                          at >= 0 && at + 1 < candidate.lines.length ? candidate.lines[at + 1]?.text || " " : " ";
+                        return (
+                          <button
+                            key={`lyrics-compare-${candidate.id}`}
+                            onClick={() => setSelectedLyricCandidateId(candidate.id)}
+                            style={{
+                              flex: selected ? 5 : 2,
+                              minWidth: 0,
+                              minHeight: selected ? 164 : 116,
+                              borderRadius: 10,
+                              border: "1px solid #2a2a35",
+                              background: selected ? "#1f3168" : "#101018",
+                              color: "#f5f5f7",
+                              opacity: selected ? 1 : 0.45,
+                              cursor: "pointer",
+                              padding: "10px 12px",
+                              textAlign: "left",
+                              transition: "all 140ms ease",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div style={{ fontSize: selected ? 30 : 20, fontWeight: 900, lineHeight: 1 }}>
+                              {idx + 1}
+                            </div>
+                            <div style={{ fontSize: selected ? 13 : 11, opacity: 0.8, marginTop: 4 }}>
+                              {candidate.label}
+                            </div>
+                            <div
+                              style={{
+                                marginTop: 8,
+                                fontSize: selected ? 15 : 12,
+                                fontWeight: selected ? 800 : 700,
+                                lineHeight: 1.35,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {p}
+                            </div>
+                            <div
+                              style={{
+                                marginTop: 3,
+                                fontSize: selected ? 20 : 13,
+                                fontWeight: 900,
+                                lineHeight: 1.25,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {c}
+                            </div>
+                            <div
+                              style={{
+                                marginTop: 3,
+                                fontSize: selected ? 15 : 12,
+                                fontWeight: selected ? 800 : 700,
+                                lineHeight: 1.35,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {n}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
 
                 {youtubeOverlayId && !hasSyncedLyrics && (
