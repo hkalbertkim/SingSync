@@ -1,0 +1,38 @@
+Create a GitHub Actions workflow that syncs GitHub activity to Linear.
+
+Repository: SingSync
+Linear Team ID: 949ab9f1-1504-422f-a646-18cf1ad57082
+
+Assumptions:
+- GitHub Actions secrets will exist:
+  LINEAR_API_KEY
+  LINEAR_TEAM_ID
+
+Issue identification rule:
+- Extract Linear issue key from:
+  - branch name (e.g., feat/HKA-70-worker-stability)
+  - PR title/body
+  - commit message
+Pattern: /(HKA-\d+)/
+
+Behavior:
+1) On push to branches feat/*, fix/*:
+   - If an issue key found, add a Linear comment with latest commit URL and message.
+2) On pull_request opened/synchronize:
+   - Add a Linear comment with PR URL + title.
+3) On pull_request closed with merged=true:
+   - If base branch is develop: move issue to "In Review"
+   - If base branch is main: move issue to "Done"
+
+Implementation:
+- Add file .github/workflows/linear-sync.yml
+- Use curl to call Linear GraphQL API
+- In the workflow, query issue by identifier (e.g., HKA-70) to get issueId
+- Then commentCreate and issueUpdate as needed.
+- State IDs:
+  In Review: 459f2d74-eb9c-4d14-8cac-fcafafd8d678
+  Done: 8cc82b83-a7d6-4bb4-98bc-39b47e297644
+
+Deliverable:
+- Commit the workflow on develop branch (not main)
+- Show the final YAML file content.
