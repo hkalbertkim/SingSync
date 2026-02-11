@@ -230,7 +230,7 @@ export default function Page() {
   };
 
   useEffect(() => {
-    if (!youtubeOverlayId) {
+    if (phase !== "singing" || !youtubeOverlayId) {
       if (youtubePlayerRef.current && typeof youtubePlayerRef.current.destroy === "function") {
         try {
           youtubePlayerRef.current.destroy();
@@ -302,7 +302,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [youtubeOverlayId]);
+  }, [youtubeOverlayId, phase]);
 
   const filtered = useMemo(() => {
     const qq = q.toLowerCase();
@@ -582,7 +582,7 @@ export default function Page() {
       cancelled = true;
       if (driftTimer) window.clearInterval(driftTimer);
     };
-  }, [phase, song, jobStatus, youtubeOverlayId, vocalGain]);
+  }, [phase, song, jobStatus, youtubeOverlayId]);
 
   // Fetch YouTube captions for lyrics when singing starts.
   useEffect(() => {
