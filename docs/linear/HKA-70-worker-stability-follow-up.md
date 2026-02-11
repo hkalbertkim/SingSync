@@ -11,3 +11,4 @@ Planned
 Acceptance
 - No duplicate processing for same videoId
 - Clear visibility into worker state
+2026-02-11T15:03:45Z linear sync test
