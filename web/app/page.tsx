@@ -1587,12 +1587,9 @@ export default function Page() {
                     <div style={{ display: "flex", gap: 8, width: "100%" }}>
                       {comparableLyricCandidates.map((candidate, idx) => {
                         const selected = selectedLyricCandidateId === candidate.id;
-                        const now = getPlaybackTime();
-                        const at = findActiveLyricIndex(candidate.lines, now + (selected ? lyricsManualOffsetSec : 0));
-                        const p = at > 0 ? candidate.lines[at - 1]?.text || " " : " ";
-                        const c = at >= 0 ? candidate.lines[at]?.text || " " : candidate.lines[0]?.text || " ";
-                        const n =
-                          at >= 0 && at + 1 < candidate.lines.length ? candidate.lines[at + 1]?.text || " " : " ";
+                        const p = candidate.lines[0]?.text || " ";
+                        const c = candidate.lines[1]?.text || candidate.lines[0]?.text || " ";
+                        const n = candidate.lines[2]?.text || " ";
                         return (
                           <button
                             key={`lyrics-compare-${candidate.id}`}
