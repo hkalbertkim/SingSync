@@ -93,130 +93,6 @@ function waitCanPlayThrough(audio: HTMLAudioElement): Promise<void> {
   });
 }
 
-const offsetEstimateCache = new Map<string, number>();
-
-function toMonoPcm(buffer: AudioBuffer): Float32Array {
-  const channels = buffer.numberOfChannels;
-  const length = buffer.length;
-  const mono = new Float32Array(length);
-  for (let ch = 0; ch < channels; ch += 1) {
-    const data = buffer.getChannelData(ch);
-    for (let i = 0; i < length; i += 1) {
-      mono[i] += data[i] / channels;
-    }
-  }
-  return mono;
-}
-
-function buildRmsEnvelope(samples: Float32Array, frameSize = 2048, hop = 1024): Float32Array {
-  if (samples.length < frameSize) return new Float32Array(0);
-  const frames = Math.floor((samples.length - frameSize) / hop) + 1;
-  const env = new Float32Array(frames);
-  for (let f = 0; f < frames; f += 1) {
-    const start = f * hop;
-    let sum = 0;
-    for (let i = 0; i < frameSize; i += 1) {
-      const v = samples[start + i];
-      sum += v * v;
-    }
-    env[f] = Math.sqrt(sum / frameSize);
-  }
-  return env;
-}
-
-function findOnsetFrame(env: Float32Array): number {
-  if (!env.length) return 0;
-  let mean = 0;
-  for (let i = 0; i < env.length; i += 1) mean += env[i];
-  mean /= env.length;
-  const threshold = Math.max(mean * 3.0, 0.008);
-  for (let i = 0; i < env.length; i += 1) {
-    if (env[i] >= threshold) return i;
-  }
-  return 0;
-}
-
-function estimateLagFrames(a: Float32Array, b: Float32Array, maxLag: number): number {
-  if (!a.length || !b.length) return 0;
-  let bestLag = 0;
-  let bestScore = -Infinity;
-  for (let lag = -maxLag; lag <= maxLag; lag += 1) {
-    let sum = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < a.length; i += 1) {
-      const j = i + lag;
-      if (j < 0 || j >= b.length) continue;
-      const av = a[i];
-      const bv = b[j];
-      sum += av * bv;
-      normA += av * av;
-      normB += bv * bv;
-    }
-    if (!normA || !normB) continue;
-    const score = sum / Math.sqrt(normA * normB);
-    if (score > bestScore) {
-      bestScore = score;
-      bestLag = lag;
-    }
-  }
-  return bestLag;
-}
-
-async function estimateInitialOffsetSec(instUrl: string, voxUrl: string): Promise<number> {
-  const cacheKey = `${instUrl}|${voxUrl}`;
-  const cached = offsetEstimateCache.get(cacheKey);
-  if (typeof cached === "number") return cached;
-
-  if (typeof window === "undefined") return 0;
-
-  try {
-    const [instRes, voxRes] = await Promise.all([
-      fetch(instUrl, { cache: "force-cache" }),
-      fetch(voxUrl, { cache: "force-cache" }),
-    ]);
-    const [instBuf, voxBuf] = await Promise.all([instRes.arrayBuffer(), voxRes.arrayBuffer()]);
-    const AC: typeof AudioContext | undefined =
-      window.AudioContext || ((window as any).webkitAudioContext as typeof AudioContext | undefined);
-    if (!AC) return 0;
-
-    const ctx = new AC();
-    const [instDecoded, voxDecoded] = await Promise.all([
-      ctx.decodeAudioData(instBuf.slice(0)),
-      ctx.decodeAudioData(voxBuf.slice(0)),
-    ]);
-    await ctx.close();
-
-    const monoInst = toMonoPcm(instDecoded);
-    const monoVox = toMonoPcm(voxDecoded);
-    const frameSize = 2048;
-    const hop = 1024;
-    const envInst = buildRmsEnvelope(monoInst, frameSize, hop);
-    const envVox = buildRmsEnvelope(monoVox, frameSize, hop);
-
-    if (!envInst.length || !envVox.length) return 0;
-
-    const onsetInst = findOnsetFrame(envInst);
-    const onsetVox = findOnsetFrame(envVox);
-    const onsetDiffFrames = onsetVox - onsetInst;
-
-    const sampleRate = Math.max(1, instDecoded.sampleRate || 48000);
-    const lagWindowSec = 2.0;
-    const maxLag = Math.round((lagWindowSec * sampleRate) / hop);
-    const lag = estimateLagFrames(envInst, envVox, maxLag);
-
-    const onsetSec = (onsetDiffFrames * hop) / sampleRate;
-    const lagSec = (lag * hop) / sampleRate;
-    const blended = lagSec * 0.7 + onsetSec * 0.3;
-    const clamped = Math.max(-1.5, Math.min(1.5, blended));
-    offsetEstimateCache.set(cacheKey, clamped);
-    return clamped;
-  } catch {
-    offsetEstimateCache.set(cacheKey, 0);
-    return 0;
-  }
-}
-
 function Card(props: { children: React.ReactNode }) {
   return (
     <div
@@ -635,8 +511,6 @@ export default function Page() {
 
     let cancelled = false;
     let driftTimer: number | null = null;
-    let longDriftTimer: number | null = null;
-    let rateResetTimer: number | null = null;
 
     // fallback for local playlist (mp4 has audio)
     if (!instUrl) {
@@ -668,7 +542,6 @@ export default function Page() {
 
     inst.volume = 1.0;
     vox.volume = vocalGain;
-    vox.playbackRate = 1.0;
 
     inst.load();
     vox.load();
@@ -677,13 +550,8 @@ export default function Page() {
       await Promise.all([waitCanPlayThrough(inst), voxUrl ? waitCanPlayThrough(vox) : Promise.resolve()]);
       if (cancelled) return;
 
-      const offsetSec = voxUrl ? await estimateInitialOffsetSec(instUrl, voxUrl) : 0;
-      if (cancelled) return;
-      const instStart = offsetSec < 0 ? Math.min(-offsetSec, 2) : 0;
-      const voxStart = offsetSec > 0 ? Math.min(offsetSec, 2) : 0;
-
-      inst.currentTime = instStart;
-      vox.currentTime = voxStart;
+      inst.currentTime = 0;
+      vox.currentTime = 0;
 
       Promise.resolve().then(() => {
         if (cancelled) return;
@@ -695,45 +563,15 @@ export default function Page() {
       const driftStart = performance.now();
       driftTimer = window.setInterval(() => {
         if (cancelled) return;
-        if (performance.now() - driftStart > 5000) {
+        if (performance.now() - driftStart > 800) {
           if (driftTimer) window.clearInterval(driftTimer);
           driftTimer = null;
           return;
         }
-        if (!voxUrl) return;
-        const expected = (inst.currentTime || 0) + offsetSec;
-        const delta = expected - (vox.currentTime || 0);
-        if (Math.abs(delta) > 0.03) {
-          vox.currentTime = Math.max(0, expected);
+        if (voxUrl && Math.abs((inst.currentTime || 0) - (vox.currentTime || 0)) > 0.03) {
+          vox.currentTime = inst.currentTime || 0;
         }
       }, 50);
-
-      if (voxUrl) {
-        longDriftTimer = window.setInterval(() => {
-          if (cancelled) return;
-          const expected = (inst.currentTime || 0) + offsetSec;
-          const delta = expected - (vox.currentTime || 0);
-          const abs = Math.abs(delta);
-          if (abs > 0.04) {
-            vox.playbackRate = 1.0;
-            vox.currentTime = Math.max(0, expected);
-            return;
-          }
-          if (abs > 0.008) {
-            const nextRate = Math.max(0.995, Math.min(1.005, 1 + delta * 0.04));
-            vox.playbackRate = nextRate;
-            if (rateResetTimer) {
-              window.clearTimeout(rateResetTimer);
-            }
-            rateResetTimer = window.setTimeout(() => {
-              vox.playbackRate = 1.0;
-              rateResetTimer = null;
-            }, 450);
-          } else if (vox.playbackRate !== 1.0) {
-            vox.playbackRate = 1.0;
-          }
-        }, 2000);
-      }
     })().catch(() => {
       // ignore sync startup errors
     });
@@ -751,9 +589,6 @@ export default function Page() {
     return () => {
       cancelled = true;
       if (driftTimer) window.clearInterval(driftTimer);
-      if (longDriftTimer) window.clearInterval(longDriftTimer);
-      if (rateResetTimer) window.clearTimeout(rateResetTimer);
-      vox.playbackRate = 1.0;
     };
   }, [phase, song, jobStatus, youtubeOverlayId]);
 
