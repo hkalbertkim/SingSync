@@ -82,6 +82,24 @@ function decodeHtml(str: string): string {
   return txt.value;
 }
 
+function getStoredChoice(key: string): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function setStoredChoice(key: string, value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function Card(props: { children: React.ReactNode }) {
   return (
     <div
@@ -466,6 +484,14 @@ export default function Page() {
       null
     );
   }, [youtubeOverlayId, ytLyricCandidates, selectedLyricCandidateId]);
+  const localLyricsCandidateKey = useMemo(
+    () => (youtubeOverlayId ? `singsync:lyrics:selected:${youtubeOverlayId}` : ""),
+    [youtubeOverlayId],
+  );
+  const localCommunityCandidateKey = useMemo(
+    () => (youtubeOverlayId ? `singsync:lyrics:community:${youtubeOverlayId}` : ""),
+    [youtubeOverlayId],
+  );
 
   useEffect(() => {
     if (!selectedLyricCandidate) return;
@@ -790,8 +816,10 @@ export default function Page() {
       .then((data: LyricsApiResponse) => {
         if (cancelled) return;
         const { candidates: finalCandidates, selectedId } = parseLyricsResponse(data);
+        const storedId = localLyricsCandidateKey ? getStoredChoice(localLyricsCandidateKey) : "";
+        const restoredId = finalCandidates.some((c) => c.id === storedId) ? storedId : selectedId;
         setYtLyricCandidates(finalCandidates);
-        setSelectedLyricCandidateId(selectedId);
+        setSelectedLyricCandidateId(restoredId);
       })
       .catch(() => {
         if (cancelled) return;
@@ -813,9 +841,11 @@ export default function Page() {
       .then((data: LyricsCandidatesPayload) => {
         if (cancelled) return;
         const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+        const storedId = localCommunityCandidateKey ? getStoredChoice(localCommunityCandidateKey) : "";
+        const preferredId = storedId || data?.bestId || candidates[0]?.id || "";
         setCommunityCandidates(candidates);
         setCommunityBestId(data?.bestId || "");
-        setCommunitySelectedId(data?.bestId || candidates[0]?.id || "");
+        setCommunitySelectedId(candidates.some((c) => c.id === preferredId) ? preferredId : candidates[0]?.id || "");
       })
       .catch(() => {
         if (cancelled) return;
@@ -827,7 +857,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [phase, youtubeOverlayId]);
+  }, [phase, youtubeOverlayId, localLyricsCandidateKey, localCommunityCandidateKey]);
 
   // Apply vocal volume live
   useEffect(() => {
@@ -839,6 +869,16 @@ export default function Page() {
     if (!vox) return;
     vox.volume = vocalGain;
   }, [vocalGain]);
+
+  useEffect(() => {
+    if (!localLyricsCandidateKey || !selectedLyricCandidateId) return;
+    setStoredChoice(localLyricsCandidateKey, selectedLyricCandidateId);
+  }, [localLyricsCandidateKey, selectedLyricCandidateId]);
+
+  useEffect(() => {
+    if (!localCommunityCandidateKey || !communitySelectedId) return;
+    setStoredChoice(localCommunityCandidateKey, communitySelectedId);
+  }, [localCommunityCandidateKey, communitySelectedId]);
 
   // Highlight loop (lyrics clock source: instrumental audio currentTime)
   useEffect(() => {

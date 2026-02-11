@@ -26,11 +26,13 @@ export default function LyricsVotingPanel({
   voteHint,
 }: Props) {
   if (candidates.length === 0) return null;
+  const top = candidates.slice(0, 3);
 
   return (
     <div style={{ width: "100%", display: "grid", gap: 10, marginBottom: 12 }}>
-      <div style={{ display: "grid", gap: 8 }}>
-        {candidates.map((c, idx) => {
+      <div style={{ fontSize: 12, opacity: 0.7 }}>No synced captions. Pick a lyrics source.</div>
+      <div style={{ display: "flex", gap: 8, width: "100%" }}>
+        {top.map((c, idx) => {
           const active = selectedId === c.id;
           return (
             <button
@@ -42,13 +44,21 @@ export default function LyricsVotingPanel({
                 background: active ? "#1a2b5a" : "#101018",
                 color: "#f5f5f7",
                 textAlign: "left",
-                padding: 10,
+                padding: "10px 12px",
+                flex: active ? 5 : 2,
+                minWidth: 0,
+                minHeight: 88,
                 cursor: "pointer",
+                opacity: active ? 1 : 0.45,
+                transition: "all 120ms ease",
               }}
             >
-              <div style={{ fontSize: 13, fontWeight: 800 }}>Lyrics {idx + 1}</div>
+              <div style={{ fontSize: active ? 14 : 13, fontWeight: active ? 900 : 800 }}>Lyrics {idx + 1}</div>
               <div style={{ fontSize: 12, opacity: 0.72, marginTop: 2 }}>
                 {c.label} · votes {c.votes}
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.72, marginTop: 6 }}>
+                {c.type === "external_link" ? "Opens in new tab" : "Use in-app synced captions"}
               </div>
             </button>
           );
