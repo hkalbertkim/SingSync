@@ -938,7 +938,7 @@ export default function Page() {
     }
     const raw = getStoredChoice(localLyricsOffsetKey);
     const parsed = Number(raw);
-    setLyricsManualOffsetSec(Number.isFinite(parsed) ? Math.max(-6, Math.min(6, parsed)) : 0);
+    setLyricsManualOffsetSec(Number.isFinite(parsed) ? parsed : 0);
   }, [localLyricsOffsetKey]);
 
   useEffect(() => {
@@ -1631,7 +1631,7 @@ export default function Page() {
                       }}
                     >
                       <button
-                        onClick={() => setLyricsManualOffsetSec((v) => Math.max(-6, Number((v - 0.5).toFixed(2))))}
+                        onClick={() => setLyricsManualOffsetSec((v) => Number((v - 0.5).toFixed(2)))}
                         style={{
                           height: 30,
                           padding: "0 10px",
@@ -1661,7 +1661,7 @@ export default function Page() {
                         Reset
                       </button>
                       <button
-                        onClick={() => setLyricsManualOffsetSec((v) => Math.min(6, Number((v + 0.5).toFixed(2))))}
+                        onClick={() => setLyricsManualOffsetSec((v) => Number((v + 0.5).toFixed(2)))}
                         style={{
                           height: 30,
                           padding: "0 10px",
