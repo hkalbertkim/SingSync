@@ -63,6 +63,8 @@ type RecentItem = {
   preparedAt: string;
 };
 
+const DEBUG_SEARCH = true;
+
 function Card(props: { children: React.ReactNode }) {
   return (
     <div
@@ -122,6 +124,7 @@ export default function Page() {
   const [youtubeResults, setYoutubeResults] = useState<YouTubeResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<YouTubeResult | null>(null);
+  const [searchDebugRaw, setSearchDebugRaw] = useState("");
 
   // Current YouTube video for overlay (muted)
   const [youtubeOverlayId, setYoutubeOverlayId] = useState<string | null>(null);
@@ -217,14 +220,26 @@ export default function Page() {
 
     setIsSearching(true);
     setPhase("selecting");
+    setSearchDebugRaw("");
 
     try {
       const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(q.trim())}`));
       const data = await res.json();
-      setYoutubeResults(data.results || []);
+      const results = Array.isArray(data?.results)
+        ? data.results
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+      setYoutubeResults(results);
+      if (DEBUG_SEARCH) {
+        setSearchDebugRaw(JSON.stringify(data).slice(0, 200));
+      }
     } catch (error) {
       console.error("Search failed:", error);
       setYoutubeResults([]);
+      if (DEBUG_SEARCH) {
+        setSearchDebugRaw(String(error));
+      }
     } finally {
       setIsSearching(false);
     }
@@ -771,14 +786,31 @@ export default function Page() {
                 </div>
               </Card>
             ) : youtubeResults.length === 0 ? (
-              <Card>
-                <div style={{ textAlign: "center", padding: 40 }}>
-                  <div style={{ fontSize: 18, marginBottom: 10 }}>No results found</div>
-                  <div style={{ opacity: 0.6 }}>Try a different search term</div>
-                </div>
-              </Card>
+              <div style={{ display: "grid", gap: 10 }}>
+                {DEBUG_SEARCH && (
+                  <Card>
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>debug: results.length = {youtubeResults.length}</div>
+                    {youtubeResults.length === 0 && (
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                        debug raw: {searchDebugRaw || "(empty)"}
+                      </div>
+                    )}
+                  </Card>
+                )}
+                <Card>
+                  <div style={{ textAlign: "center", padding: 40 }}>
+                    <div style={{ fontSize: 18, marginBottom: 10 }}>No results found</div>
+                    <div style={{ opacity: 0.6 }}>Try a different search term</div>
+                  </div>
+                </Card>
+              </div>
             ) : (
               <div style={{ display: "grid", gap: 12 }}>
+                {DEBUG_SEARCH && (
+                  <Card>
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>debug: results.length = {youtubeResults.length}</div>
+                  </Card>
+                )}
                 {youtubeResults.map((video) => (
                   <button
                     key={video.videoId}
