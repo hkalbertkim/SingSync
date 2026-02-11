@@ -13,10 +13,13 @@ import {
   type LyricsSource,
 } from "../lib/lyrics";
 
-const API_BASE = (
-  process.env.NEXT_PUBLIC_API_BASE ||
-  (process.env.NODE_ENV !== "production" ? "http://127.0.0.1:4000" : "")
-).replace(/\/$/, "");
+const RAW_API_BASE = (process.env.NEXT_PUBLIC_API_BASE || "").trim().replace(/\/$/, "");
+const API_BASE =
+  process.env.NODE_ENV === "production"
+    ? RAW_API_BASE.startsWith("https://")
+      ? RAW_API_BASE
+      : ""
+    : RAW_API_BASE || "http://127.0.0.1:4000";
 
 function apiUrl(path: string): string {
   if (!path.startsWith("/")) return path;
