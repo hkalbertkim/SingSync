@@ -74,10 +74,6 @@ type LyricsCandidatesPayload = {
 };
 
 const DEBUG_SEARCH = true;
-const TRACK_SYNC_OVERRIDES: Record<string, { audioOffsetSec?: number; lyricsOffsetSec?: number }> = {
-  // Extreme - More Than Words (Official Music Video)
-  UrIiLvg58SY: { audioOffsetSec: -0.09, lyricsOffsetSec: 0.22 },
-};
 
 function decodeHtml(str: string): string {
   if (typeof document === "undefined") return str;
@@ -469,18 +465,12 @@ export default function Page() {
   const activeLyrics = useMemo(() => {
     return youtubeOverlayId ? ytLyrics : lyrics;
   }, [youtubeOverlayId, ytLyrics, lyrics]);
-  const trackSyncOverride = useMemo(() => {
-    const id = youtubeOverlayId || song?.id || "";
-    if (!id) return null;
-    return TRACK_SYNC_OVERRIDES[id] || null;
-  }, [youtubeOverlayId, song?.id]);
-  const lyricsClockOffsetSec = trackSyncOverride?.lyricsOffsetSec || 0;
 
   const prevLine = active > 0 ? activeLyrics[active - 1]?.text || "" : "";
   const currentLine = active >= 0 ? activeLyrics[active]?.text || "" : "";
   const nextLine = active >= 0 && active + 1 < activeLyrics.length ? activeLyrics[active + 1]?.text || "" : "";
   const firstLyricAt = activeLyrics.length > 0 ? activeLyrics[0].t : 0;
-  const nowTime = (instrumentalRef.current?.currentTime || 0) + lyricsClockOffsetSec;
+  const nowTime = instrumentalRef.current?.currentTime || 0;
   const secondsUntilFirstLyric = Math.max(0, Math.ceil(firstLyricAt - nowTime));
 
   // Search YouTube
@@ -687,9 +677,7 @@ export default function Page() {
       await Promise.all([waitCanPlayThrough(inst), voxUrl ? waitCanPlayThrough(vox) : Promise.resolve()]);
       if (cancelled) return;
 
-      const estimatedOffsetSec = voxUrl ? await estimateInitialOffsetSec(instUrl, voxUrl) : 0;
-      const manualOffsetSec = trackSyncOverride?.audioOffsetSec || 0;
-      const offsetSec = estimatedOffsetSec + manualOffsetSec;
+      const offsetSec = voxUrl ? await estimateInitialOffsetSec(instUrl, voxUrl) : 0;
       if (cancelled) return;
       const instStart = offsetSec < 0 ? Math.min(-offsetSec, 2) : 0;
       const voxStart = offsetSec > 0 ? Math.min(offsetSec, 2) : 0;
@@ -767,7 +755,7 @@ export default function Page() {
       if (rateResetTimer) window.clearTimeout(rateResetTimer);
       vox.playbackRate = 1.0;
     };
-  }, [phase, song, jobStatus, youtubeOverlayId, trackSyncOverride]);
+  }, [phase, song, jobStatus, youtubeOverlayId]);
 
   useEffect(() => {
     if (phase !== "singing") {
@@ -867,13 +855,12 @@ export default function Page() {
 
     let raf = 0;
     const loop = () => {
-      const lyricClock = (inst.currentTime || 0) + lyricsClockOffsetSec;
-      setActive(findActiveLyricIndex(activeLyrics, lyricClock));
+      setActive(findActiveLyricIndex(activeLyrics, inst.currentTime || 0));
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [phase, activeLyrics, lyricsClockOffsetSec]);
+  }, [phase, activeLyrics]);
 
   // song end detection (source of truth: instrumental track)
   useEffect(() => {
