@@ -126,6 +126,7 @@ export default function Page() {
   // 2-track audio mixing
   const instrumentalRef = useRef<HTMLAudioElement | null>(null);
   const vocalsRef = useRef<HTMLAudioElement | null>(null);
+  const playbackInitKeyRef = useRef("");
 
   const [phase, setPhase] = useState<Phase>("browse");
   const [songs, setSongs] = useState<Song[]>([]);
@@ -500,6 +501,13 @@ export default function Page() {
     const instUrl = jobStatus?.result?.instrumentalUrl ? apiUrl(jobStatus.result.instrumentalUrl) : null;
 
     const voxUrl = jobStatus?.result?.vocalsUrl ? apiUrl(jobStatus.result.vocalsUrl) : null;
+    const playbackKey = `${song.id}|${instUrl || song.videoFile}|${voxUrl || ""}|${youtubeOverlayId || ""}`;
+
+    if (playbackInitKeyRef.current === playbackKey) {
+      return;
+    }
+
+    playbackInitKeyRef.current = playbackKey;
 
     let cancelled = false;
     let driftTimer: number | null = null;
@@ -583,6 +591,12 @@ export default function Page() {
       if (driftTimer) window.clearInterval(driftTimer);
     };
   }, [phase, song, jobStatus, youtubeOverlayId]);
+
+  useEffect(() => {
+    if (phase !== "singing") {
+      playbackInitKeyRef.current = "";
+    }
+  }, [phase]);
 
   // Fetch YouTube captions for lyrics when singing starts.
   useEffect(() => {
@@ -819,6 +833,7 @@ export default function Page() {
     setVocalGain(0.0);
     setYoutubeOverlayId(null);
     setLyricsEnabled(true);
+    playbackInitKeyRef.current = "";
     setPhase("browse");
   };
 
