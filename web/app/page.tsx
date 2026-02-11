@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import LyricsPicker from "../components/LyricsPicker";
+import LyricsVotingPanel, { type CommunityCandidate } from "../components/LyricsVotingPanel";
 import {
   findActiveLyricIndex,
   parseLrc,
@@ -66,7 +67,31 @@ type RecentItem = {
   preparedAt: string;
 };
 
+type LyricsCandidatesPayload = {
+  videoId: string;
+  bestId: string;
+  candidates: CommunityCandidate[];
+};
+
 const DEBUG_SEARCH = true;
+
+function decodeHtml(str: string): string {
+  if (typeof document === "undefined") return str;
+  const txt = document.createElement("textarea");
+  txt.innerHTML = str;
+  return txt.value;
+}
+
+function waitCanPlayThrough(audio: HTMLAudioElement): Promise<void> {
+  if (audio.readyState >= 4) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      audio.removeEventListener("canplaythrough", done);
+      resolve();
+    };
+    audio.addEventListener("canplaythrough", done);
+  });
+}
 
 function Card(props: { children: React.ReactNode }) {
   return (
@@ -131,6 +156,8 @@ export default function Page() {
 
   // Current YouTube video for overlay (muted)
   const [youtubeOverlayId, setYoutubeOverlayId] = useState<string | null>(null);
+  const youtubePlayerRef = useRef<any>(null);
+  const youtubeHostRef = useRef<HTMLDivElement | null>(null);
 
   // Job processing state
   const [jobId, setJobId] = useState<string | null>(null);
@@ -142,6 +169,13 @@ export default function Page() {
   // What People Are Singing
   const [recent, setRecent] = useState<RecentItem[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
+
+  // Community lyrics candidates
+  const [communityCandidates, setCommunityCandidates] = useState<CommunityCandidate[]>([]);
+  const [communityBestId, setCommunityBestId] = useState("");
+  const [communitySelectedId, setCommunitySelectedId] = useState("");
+  const [communityVoteBusy, setCommunityVoteBusy] = useState(false);
+  const [communityVoteHint, setCommunityVoteHint] = useState("");
 
   // ad rotation dummy
   const [adIndex, setAdIndex] = useState(0);
@@ -172,6 +206,103 @@ export default function Page() {
   useEffect(() => {
     refreshRecent();
   }, []);
+
+  const playYouTube = () => {
+    const player = youtubePlayerRef.current;
+    if (player && typeof player.playVideo === "function") {
+      try {
+        player.playVideo();
+      } catch {
+        // ignore player errors
+      }
+    }
+  };
+
+  const pauseYouTube = () => {
+    const player = youtubePlayerRef.current;
+    if (player && typeof player.pauseVideo === "function") {
+      try {
+        player.pauseVideo();
+      } catch {
+        // ignore player errors
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!youtubeOverlayId) {
+      if (youtubePlayerRef.current && typeof youtubePlayerRef.current.destroy === "function") {
+        try {
+          youtubePlayerRef.current.destroy();
+        } catch {
+          // ignore destroy errors
+        }
+      }
+      youtubePlayerRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    const playerHost = youtubeHostRef.current;
+    if (!playerHost) return;
+
+    const initPlayer = () => {
+      if (cancelled) return;
+      const YTGlobal = (window as any).YT;
+      if (!YTGlobal || !YTGlobal.Player || !youtubeHostRef.current) return;
+
+      if (youtubePlayerRef.current && typeof youtubePlayerRef.current.loadVideoById === "function") {
+        youtubePlayerRef.current.loadVideoById(youtubeOverlayId);
+        youtubePlayerRef.current.mute?.();
+        return;
+      }
+
+      youtubePlayerRef.current = new YTGlobal.Player(youtubeHostRef.current, {
+        videoId: youtubeOverlayId,
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          rel: 0,
+          playsinline: 1,
+          modestbranding: 1,
+        },
+        events: {
+          onReady: (evt: any) => {
+            try {
+              evt.target.mute();
+            } catch {
+              // ignore
+            }
+          },
+        },
+      });
+    };
+
+    if ((window as any).YT?.Player) {
+      initPlayer();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const scriptId = "youtube-iframe-api";
+    if (!document.getElementById(scriptId)) {
+      const script = document.createElement("script");
+      script.id = scriptId;
+      script.src = "https://www.youtube.com/iframe_api";
+      document.body.appendChild(script);
+    }
+
+    const prevReady = (window as any).onYouTubeIframeAPIReady;
+    (window as any).onYouTubeIframeAPIReady = () => {
+      if (typeof prevReady === "function") prevReady();
+      initPlayer();
+    };
+
+    return () => {
+      cancelled = true;
+    };
+  }, [youtubeOverlayId]);
 
   const filtered = useMemo(() => {
     const qq = q.toLowerCase();
@@ -255,7 +386,7 @@ export default function Page() {
 
     setSong({
       id: video.videoId,
-      title: `${video.title} — ${video.channelTitle}`,
+      title: `${decodeHtml(video.title)} — ${decodeHtml(video.channelTitle)}`,
       videoFile: `${video.videoId}.mp4`,
     });
 
@@ -286,7 +417,7 @@ export default function Page() {
 
     setSong({
       id: item.videoId,
-      title: `${item.title || item.videoId} — ${item.channelTitle || "Unknown"}`,
+      title: `${decodeHtml(item.title || item.videoId)} — ${decodeHtml(item.channelTitle || "Unknown")}`,
       videoFile: `${item.videoId}.mp4`,
     });
 
@@ -370,6 +501,9 @@ export default function Page() {
 
     const voxUrl = jobStatus?.result?.vocalsUrl ? apiUrl(jobStatus.result.vocalsUrl) : null;
 
+    let cancelled = false;
+    let driftTimer: number | null = null;
+
     // fallback for local playlist (mp4 has audio)
     if (!instUrl) {
       inst.src = `/karaoke/${encodeURIComponent(song.videoFile)}`;
@@ -377,14 +511,20 @@ export default function Page() {
       inst.currentTime = 0;
       inst.volume = 1.0;
       inst.load();
-      inst.play().catch(() => {});
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        inst.play().catch(() => {});
+        pauseYouTube();
+      });
       setVocalGain(0.0);
 
       fetch(`/lyrics/${encodeURIComponent(song.videoFile)}.lrc`, { cache: "no-store" })
         .then((r) => (r.ok ? r.text() : ""))
         .then((t) => setLyrics(parseLrc(t)))
         .catch(() => setLyrics([]));
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     inst.src = instUrl;
@@ -398,8 +538,35 @@ export default function Page() {
     inst.load();
     vox.load();
 
-    inst.play().catch(() => {});
-    if (voxUrl) vox.play().catch(() => {});
+    (async () => {
+      await Promise.all([waitCanPlayThrough(inst), voxUrl ? waitCanPlayThrough(vox) : Promise.resolve()]);
+      if (cancelled) return;
+
+      inst.currentTime = 0;
+      vox.currentTime = 0;
+
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        inst.play().catch(() => {});
+        if (voxUrl) vox.play().catch(() => {});
+        playYouTube();
+      });
+
+      const driftStart = performance.now();
+      driftTimer = window.setInterval(() => {
+        if (cancelled) return;
+        if (performance.now() - driftStart > 800) {
+          if (driftTimer) window.clearInterval(driftTimer);
+          driftTimer = null;
+          return;
+        }
+        if (voxUrl && Math.abs((inst.currentTime || 0) - (vox.currentTime || 0)) > 0.03) {
+          vox.currentTime = inst.currentTime || 0;
+        }
+      }, 50);
+    })().catch(() => {
+      // ignore sync startup errors
+    });
 
     // YouTube songs use /api/lyrics captions path instead of local lrc.
     if (youtubeOverlayId) {
@@ -410,7 +577,12 @@ export default function Page() {
         .then((t) => setLyrics(parseLrc(t)))
         .catch(() => setLyrics([]));
     }
-  }, [phase, song, jobStatus, youtubeOverlayId]);
+
+    return () => {
+      cancelled = true;
+      if (driftTimer) window.clearInterval(driftTimer);
+    };
+  }, [phase, song, jobStatus, youtubeOverlayId, vocalGain]);
 
   // Fetch YouTube captions for lyrics when singing starts.
   useEffect(() => {
@@ -424,6 +596,10 @@ export default function Page() {
       setYtPlainLyrics("");
       setYtLyricCandidates([]);
       setSelectedLyricCandidateId("");
+      setCommunityCandidates([]);
+      setCommunityBestId("");
+      setCommunitySelectedId("");
+      setCommunityVoteHint("");
       return;
     }
 
@@ -432,6 +608,7 @@ export default function Page() {
     setYtLyricsSource("idle");
     setYtLyricCandidates([]);
     setSelectedLyricCandidateId("");
+    setCommunityVoteHint("");
 
     fetch(apiUrl(`/api/lyrics?videoId=${encodeURIComponent(youtubeOverlayId)}`), {
       cache: "no-store",
@@ -454,6 +631,24 @@ export default function Page() {
       })
       .finally(() => {
         if (!cancelled) setYtLyricsLoading(false);
+      });
+
+    fetch(apiUrl(`/api/lyrics/${encodeURIComponent(youtubeOverlayId)}/candidates`), {
+      cache: "no-store",
+    })
+      .then((r) => r.json())
+      .then((data: LyricsCandidatesPayload) => {
+        if (cancelled) return;
+        const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+        setCommunityCandidates(candidates);
+        setCommunityBestId(data?.bestId || "");
+        setCommunitySelectedId(data?.bestId || candidates[0]?.id || "");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCommunityCandidates([]);
+        setCommunityBestId("");
+        setCommunitySelectedId("");
       });
 
     return () => {
@@ -502,6 +697,7 @@ export default function Page() {
         vox.pause();
         vox.currentTime = 0;
       }
+      pauseYouTube();
       setPhase("post_song");
     };
 
@@ -509,17 +705,60 @@ export default function Page() {
     return () => inst.removeEventListener("ended", onEnded);
   }, [phase, song, jobStatus]);
 
+  const hasSyncedLyrics = youtubeOverlayId && ytLyricsMode === "timed" && ytLyrics.length > 0;
+
+  const handleCommunitySelect = (candidate: CommunityCandidate) => {
+    setCommunitySelectedId(candidate.id);
+    if (candidate.type === "external_link" && candidate.url) {
+      window.open(candidate.url, "_blank", "noopener,noreferrer");
+      setCommunityVoteHint(`Opened: ${candidate.label}`);
+      return;
+    }
+    if (candidate.type === "youtube_captions") {
+      setCommunityVoteHint("Using YouTube captions in sync mode.");
+    } else {
+      setCommunityVoteHint(`Selected: ${candidate.label}`);
+    }
+  };
+
+  const handleCommunityVote = async () => {
+    if (!youtubeOverlayId || !communitySelectedId) return;
+    setCommunityVoteBusy(true);
+    setCommunityVoteHint("");
+    try {
+      const r = await fetch(apiUrl(`/api/lyrics/${encodeURIComponent(youtubeOverlayId)}/vote`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateId: communitySelectedId }),
+      });
+      const payload: LyricsCandidatesPayload = await r.json();
+      const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+      setCommunityCandidates(candidates);
+      setCommunityBestId(payload?.bestId || "");
+      setCommunitySelectedId(payload?.bestId || communitySelectedId);
+      setCommunityVoteHint("Thanks. Vote saved.");
+    } catch {
+      setCommunityVoteHint("Vote failed. Try again.");
+    } finally {
+      setCommunityVoteBusy(false);
+    }
+  };
+
   const toggle = () => {
     const inst = instrumentalRef.current;
     const vox = vocalsRef.current;
     if (!inst || !vox) return;
 
     if (inst.paused) {
-      inst.play().catch(() => {});
-      if (vox.src) vox.play().catch(() => {});
+      Promise.resolve().then(() => {
+        inst.play().catch(() => {});
+        if (vox.src) vox.play().catch(() => {});
+        playYouTube();
+      });
     } else {
       inst.pause();
       vox.pause();
+      pauseYouTube();
     }
   };
 
@@ -550,9 +789,15 @@ export default function Page() {
 
     try {
       inst?.pause();
+      if (inst) inst.currentTime = 0;
       if (inst) inst.src = "";
       vox?.pause();
+      if (vox) vox.currentTime = 0;
       if (vox) vox.src = "";
+      pauseYouTube();
+      if (youtubePlayerRef.current && typeof youtubePlayerRef.current.seekTo === "function") {
+        youtubePlayerRef.current.seekTo(0, true);
+      }
     } catch {}
 
     setLyrics([]);
@@ -592,10 +837,6 @@ export default function Page() {
       {AD_MESSAGES[adIndex]}
     </div>
   );
-
-  const youtubeEmbedUrl = youtubeOverlayId
-    ? `https://www.youtube-nocookie.com/embed/${youtubeOverlayId}?autoplay=1&mute=1&controls=0&rel=0&playsinline=1&modestbranding=1`
-    : null;
 
   return (
     <main style={{ minHeight: "100vh", padding: 24, background: "#0b0b0f", color: "#f5f5f7" }}>
@@ -692,7 +933,7 @@ export default function Page() {
                       }}
                     >
                       <div style={{ display: "grid", gap: 4 }}>
-                        <div style={{ fontWeight: 900 }}>{it.title || it.videoId}</div>
+                        <div style={{ fontWeight: 900 }}>{decodeHtml(it.title || it.videoId)}</div>
                         <div style={{ fontSize: 12, opacity: 0.7 }}>
                           {it.channelTitle && it.channelTitle !== "Unknown" ? it.channelTitle : "Unknown artist"} ·{" "}
                           prepared {formatTimeAgo(it.preparedAt)}
@@ -746,7 +987,7 @@ export default function Page() {
                     }}
                   >
                     <div style={{ display: "grid", gap: 4 }}>
-                      <div style={{ fontWeight: 900 }}>{s.title}</div>
+                      <div style={{ fontWeight: 900 }}>{decodeHtml(s.title)}</div>
                       <div style={{ fontSize: 12, opacity: 0.6 }}>
                         {s.channelTitle ? `${s.channelTitle} · ` : ""}
                         {s.videoFile}
@@ -837,9 +1078,9 @@ export default function Page() {
                       style={{ width: 96, height: 54, borderRadius: 10, objectFit: "cover" }}
                     />
                     <div style={{ flex: 1, display: "grid", gap: 4 }}>
-                      <div style={{ fontWeight: 900, lineHeight: 1.2 }}>{video.title}</div>
+                      <div style={{ fontWeight: 900, lineHeight: 1.2 }}>{decodeHtml(video.title)}</div>
                       <div style={{ fontSize: 12, opacity: 0.7 }}>
-                        {video.channelTitle} · {video.duration}
+                        {decodeHtml(video.channelTitle)} · {video.duration}
                       </div>
                     </div>
                     <div style={{ fontWeight: 900, opacity: 0.9 }}>Select</div>
@@ -855,7 +1096,7 @@ export default function Page() {
             <div style={{ display: "grid", gap: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <div style={{ fontSize: 18, fontWeight: 900 }}>
-                  Preparing karaoke{selectedVideo ? `: ${selectedVideo.title}` : ""}…
+                  Preparing karaoke{selectedVideo ? `: ${decodeHtml(selectedVideo.title)}` : ""}…
                 </div>
                 <div style={{ fontSize: 12, opacity: 0.7 }}>{Math.round(prep)}%</div>
               </div>
@@ -892,7 +1133,7 @@ export default function Page() {
           <div style={{ display: "grid", gap: 12 }}>
             <Card>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontWeight: 900 }}>{song?.title}</div>
+                <div style={{ fontWeight: 900 }}>{song ? decodeHtml(song.title) : ""}</div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
                     onClick={() => setLyricsEnabled((v) => !v)}
@@ -943,23 +1184,18 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* YouTube Video Overlay (muted) */}
+              {/* YouTube Video Overlay (muted, IFrame API controlled) */}
               <div style={{ marginTop: 12, borderRadius: 12, overflow: "hidden", background: "#000" }}>
                 <div style={{ position: "relative", width: "100%", paddingTop: "56.25%" }}>
-                  {youtubeEmbedUrl ? (
-                    <iframe
-                      key={youtubeOverlayId || "yt"}
-                      src={youtubeEmbedUrl}
-                      title="YouTube video"
-                      allow="autoplay; encrypted-media; picture-in-picture"
-                      allowFullScreen
+                  {youtubeOverlayId ? (
+                    <div
+                      ref={youtubeHostRef}
                       style={{
                         position: "absolute",
                         top: 0,
                         left: 0,
                         width: "100%",
                         height: "100%",
-                        border: 0,
                       }}
                     />
                   ) : (
@@ -1034,6 +1270,17 @@ export default function Page() {
                   />
                 )}
 
+                {youtubeOverlayId && !hasSyncedLyrics && (
+                  <LyricsVotingPanel
+                    candidates={communityCandidates}
+                    selectedId={communitySelectedId || communityBestId}
+                    onSelect={handleCommunitySelect}
+                    onVote={handleCommunityVote}
+                    voteBusy={communityVoteBusy}
+                    voteHint={communityVoteHint}
+                  />
+                )}
+
                 {!lyricsEnabled ? (
                   <div style={{ fontSize: 14, opacity: 0.7 }}>Lyrics are off.</div>
                 ) : ytLyricsLoading && youtubeOverlayId ? (
@@ -1056,7 +1303,7 @@ export default function Page() {
                 ) : activeLyrics.length === 0 ? (
                   <div style={{ fontSize: 14, opacity: 0.75 }}>
                     {youtubeOverlayId && ytLyricsSource === "none"
-                      ? "No lyrics available for this video."
+                      ? "No synced captions available. Try Lyrics 1/2/3 sources above."
                       : "No lyrics available."}
                   </div>
                 ) : active < 0 ? (
@@ -1168,7 +1415,7 @@ export default function Page() {
                         }}
                       >
                         <div style={{ display: "grid", gap: 4 }}>
-                          <div style={{ fontWeight: 900 }}>{it.title || it.videoId}</div>
+                          <div style={{ fontWeight: 900 }}>{decodeHtml(it.title || it.videoId)}</div>
                           <div style={{ fontSize: 12, opacity: 0.7 }}>
                             {it.channelTitle && it.channelTitle !== "Unknown" ? it.channelTitle : "Unknown artist"} ·{" "}
                             prepared {formatTimeAgo(it.preparedAt)}
