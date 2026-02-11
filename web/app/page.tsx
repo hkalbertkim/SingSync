@@ -202,6 +202,7 @@ export default function Page() {
   const [communitySelectedId, setCommunitySelectedId] = useState("");
   const [communityVoteBusy, setCommunityVoteBusy] = useState(false);
   const [communityVoteHint, setCommunityVoteHint] = useState("");
+  const [lyricsManualOffsetSec, setLyricsManualOffsetSec] = useState(0);
 
   // ad rotation dummy
   const [adIndex, setAdIndex] = useState(0);
@@ -502,9 +503,9 @@ export default function Page() {
         timed[1],
         {
           ...base,
-          id: `${base.id}__late_350`,
-          label: `${base.label} (+0.35s)`,
-          lines: shiftLyricLines(base.lines, 0.35),
+          id: `${base.id}__late_1200`,
+          label: `${base.label} (+1.20s)`,
+          lines: shiftLyricLines(base.lines, 1.2),
         },
       ];
     }
@@ -513,9 +514,9 @@ export default function Page() {
     return [
       {
         ...base,
-        id: `${base.id}__early_450`,
-        label: `${base.label} (-0.45s)`,
-        lines: shiftLyricLines(base.lines, -0.45),
+        id: `${base.id}__early_1800`,
+        label: `${base.label} (-1.80s)`,
+        lines: shiftLyricLines(base.lines, -1.8),
       },
       {
         ...base,
@@ -525,9 +526,9 @@ export default function Page() {
       },
       {
         ...base,
-        id: `${base.id}__late_450`,
-        label: `${base.label} (+0.45s)`,
-        lines: shiftLyricLines(base.lines, 0.45),
+        id: `${base.id}__late_1800`,
+        label: `${base.label} (+1.80s)`,
+        lines: shiftLyricLines(base.lines, 1.8),
       },
     ];
   }, [ytLyricCandidates]);
@@ -542,6 +543,13 @@ export default function Page() {
   const localLyricsCandidateKey = useMemo(
     () => (youtubeOverlayId ? `singsync:lyrics:selected:${youtubeOverlayId}` : ""),
     [youtubeOverlayId],
+  );
+  const localLyricsOffsetKey = useMemo(
+    () =>
+      youtubeOverlayId && selectedLyricCandidateId
+        ? `singsync:lyrics:offset:${youtubeOverlayId}:${selectedLyricCandidateId}`
+        : "",
+    [youtubeOverlayId, selectedLyricCandidateId],
   );
   const localCommunityCandidateKey = useMemo(
     () => (youtubeOverlayId ? `singsync:lyrics:community:${youtubeOverlayId}` : ""),
@@ -571,7 +579,8 @@ export default function Page() {
   const nextLine = active >= 0 && active + 1 < activeLyrics.length ? activeLyrics[active + 1]?.text || "" : "";
   const firstLyricAt = activeLyrics.length > 0 ? activeLyrics[0].t : 0;
   const nowTime = getPlaybackTime();
-  const secondsUntilFirstLyric = Math.max(0, Math.ceil(firstLyricAt - nowTime));
+  const lyricClock = nowTime + lyricsManualOffsetSec;
+  const secondsUntilFirstLyric = Math.max(0, Math.ceil(firstLyricAt - lyricClock));
 
   // Search YouTube
   const handleSearch = async () => {
@@ -923,6 +932,21 @@ export default function Page() {
   }, [localLyricsCandidateKey, selectedLyricCandidateId]);
 
   useEffect(() => {
+    if (!localLyricsOffsetKey) {
+      setLyricsManualOffsetSec(0);
+      return;
+    }
+    const raw = getStoredChoice(localLyricsOffsetKey);
+    const parsed = Number(raw);
+    setLyricsManualOffsetSec(Number.isFinite(parsed) ? Math.max(-6, Math.min(6, parsed)) : 0);
+  }, [localLyricsOffsetKey]);
+
+  useEffect(() => {
+    if (!localLyricsOffsetKey) return;
+    setStoredChoice(localLyricsOffsetKey, String(lyricsManualOffsetSec));
+  }, [localLyricsOffsetKey, lyricsManualOffsetSec]);
+
+  useEffect(() => {
     if (!localCommunityCandidateKey || !communitySelectedId) return;
     setStoredChoice(localCommunityCandidateKey, communitySelectedId);
   }, [localCommunityCandidateKey, communitySelectedId]);
@@ -938,12 +962,12 @@ export default function Page() {
 
     let raf = 0;
     const loop = () => {
-      setActive(findActiveLyricIndex(activeLyrics, getPlaybackTime()));
+      setActive(findActiveLyricIndex(activeLyrics, getPlaybackTime() + lyricsManualOffsetSec));
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [phase, activeLyrics]);
+  }, [phase, activeLyrics, lyricsManualOffsetSec]);
 
   // song end detection (source of truth: instrumental track)
   useEffect(() => {
@@ -1564,7 +1588,7 @@ export default function Page() {
                       {comparableLyricCandidates.map((candidate, idx) => {
                         const selected = selectedLyricCandidateId === candidate.id;
                         const now = getPlaybackTime();
-                        const at = findActiveLyricIndex(candidate.lines, now);
+                        const at = findActiveLyricIndex(candidate.lines, now + (selected ? lyricsManualOffsetSec : 0));
                         const p = at > 0 ? candidate.lines[at - 1]?.text || " " : " ";
                         const c = at >= 0 ? candidate.lines[at]?.text || " " : candidate.lines[0]?.text || " ";
                         const n =
@@ -1637,6 +1661,66 @@ export default function Page() {
                           </button>
                         );
                       })}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        marginTop: 2,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <button
+                        onClick={() => setLyricsManualOffsetSec((v) => Math.max(-6, Number((v - 0.2).toFixed(2))))}
+                        style={{
+                          height: 30,
+                          padding: "0 10px",
+                          borderRadius: 10,
+                          border: "1px solid #2a2a35",
+                          background: "#101018",
+                          color: "#f5f5f7",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Later (-0.2s)
+                      </button>
+                      <button
+                        onClick={() => setLyricsManualOffsetSec(0)}
+                        style={{
+                          height: 30,
+                          padding: "0 10px",
+                          borderRadius: 10,
+                          border: "1px solid #2a2a35",
+                          background: "#101018",
+                          color: "#f5f5f7",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button
+                        onClick={() => setLyricsManualOffsetSec((v) => Math.min(6, Number((v + 0.2).toFixed(2))))}
+                        style={{
+                          height: 30,
+                          padding: "0 10px",
+                          borderRadius: 10,
+                          border: "1px solid #2a2a35",
+                          background: "#101018",
+                          color: "#f5f5f7",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Earlier (+0.2s)
+                      </button>
+                      <div style={{ fontSize: 12, opacity: 0.72 }}>
+                        Current sync adjust: {lyricsManualOffsetSec > 0 ? "+" : ""}
+                        {lyricsManualOffsetSec.toFixed(2)}s
+                      </div>
                     </div>
                   </div>
                 )}
