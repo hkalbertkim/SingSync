@@ -82,17 +82,6 @@ function decodeHtml(str: string): string {
   return txt.value;
 }
 
-function waitCanPlayThrough(audio: HTMLAudioElement): Promise<void> {
-  if (audio.readyState >= 4) return Promise.resolve();
-  return new Promise((resolve) => {
-    const done = () => {
-      audio.removeEventListener("canplaythrough", done);
-      resolve();
-    };
-    audio.addEventListener("canplaythrough", done);
-  });
-}
-
 function Card(props: { children: React.ReactNode }) {
   return (
     <div
@@ -127,6 +116,18 @@ export default function Page() {
   const instrumentalRef = useRef<HTMLAudioElement | null>(null);
   const vocalsRef = useRef<HTMLAudioElement | null>(null);
   const playbackInitKeyRef = useRef("");
+  const useHtmlAudioRef = useRef(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const vocalGainNodeRef = useRef<GainNode | null>(null);
+  const instrumentalBufferRef = useRef<AudioBuffer | null>(null);
+  const vocalsBufferRef = useRef<AudioBuffer | null>(null);
+  const instrumentalSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const vocalsSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const startedAtRef = useRef(0);
+  const pausedAtRef = useRef(0);
+  const durationRef = useRef(0);
+  const isPlayingRef = useRef(false);
 
   const [phase, setPhase] = useState<Phase>("browse");
   const [songs, setSongs] = useState<Song[]>([]);
@@ -230,11 +231,124 @@ export default function Page() {
     }
   };
 
+  const ensureAudioContext = async () => {
+    let ctx = audioContextRef.current;
+    if (!ctx) {
+      const AC: typeof AudioContext | undefined =
+        window.AudioContext || ((window as any).webkitAudioContext as typeof AudioContext | undefined);
+      if (!AC) return null;
+      ctx = new AC();
+      audioContextRef.current = ctx;
+
+      const master = ctx.createGain();
+      master.gain.value = 1.0;
+      master.connect(ctx.destination);
+      masterGainRef.current = master;
+
+      const voxGain = ctx.createGain();
+      voxGain.gain.value = vocalGain;
+      voxGain.connect(master);
+      vocalGainNodeRef.current = voxGain;
+    }
+    if (ctx.state === "suspended") {
+      try {
+        await ctx.resume();
+      } catch {
+        // ignore resume errors
+      }
+    }
+    return ctx;
+  };
+
+  const getPlaybackTime = () => {
+    if (useHtmlAudioRef.current) {
+      return instrumentalRef.current?.currentTime || 0;
+    }
+    const ctx = audioContextRef.current;
+    if (!ctx) return pausedAtRef.current || 0;
+    if (!isPlayingRef.current) return pausedAtRef.current || 0;
+    return Math.min(durationRef.current || Infinity, Math.max(0, ctx.currentTime - startedAtRef.current));
+  };
+
+  const stopWebAudioSources = () => {
+    const instSrc = instrumentalSourceRef.current;
+    const voxSrc = vocalsSourceRef.current;
+    if (instSrc) {
+      try {
+        instSrc.stop();
+      } catch {}
+      try {
+        instSrc.disconnect();
+      } catch {}
+    }
+    if (voxSrc) {
+      try {
+        voxSrc.stop();
+      } catch {}
+      try {
+        voxSrc.disconnect();
+      } catch {}
+    }
+    instrumentalSourceRef.current = null;
+    vocalsSourceRef.current = null;
+  };
+
+  const pauseWebAudio = () => {
+    if (!isPlayingRef.current) return;
+    pausedAtRef.current = getPlaybackTime();
+    isPlayingRef.current = false;
+    stopWebAudioSources();
+  };
+
+  const startWebAudio = async (fromTime: number) => {
+    const ctx = await ensureAudioContext();
+    const instBuffer = instrumentalBufferRef.current;
+    if (!ctx || !instBuffer || !masterGainRef.current) return;
+
+    const startOffset = Math.min(Math.max(0, fromTime), Math.max(0, instBuffer.duration - 0.01));
+
+    stopWebAudioSources();
+
+    const instSrc = ctx.createBufferSource();
+    instSrc.buffer = instBuffer;
+    instSrc.connect(masterGainRef.current);
+    instrumentalSourceRef.current = instSrc;
+
+    const voxBuffer = vocalsBufferRef.current;
+    if (voxBuffer && vocalGainNodeRef.current) {
+      const voxSrc = ctx.createBufferSource();
+      voxSrc.buffer = voxBuffer;
+      voxSrc.connect(vocalGainNodeRef.current);
+      vocalsSourceRef.current = voxSrc;
+    }
+
+    const when = ctx.currentTime + 0.02;
+    startedAtRef.current = when - startOffset;
+    pausedAtRef.current = startOffset;
+    isPlayingRef.current = true;
+
+    instSrc.start(when, startOffset);
+    if (vocalsSourceRef.current) {
+      vocalsSourceRef.current.start(when, startOffset);
+    }
+
+    instSrc.onended = () => {
+      if (!isPlayingRef.current) return;
+      const t = getPlaybackTime();
+      if (durationRef.current > 0 && t >= durationRef.current - 0.05) {
+        isPlayingRef.current = false;
+        pausedAtRef.current = 0;
+        stopWebAudioSources();
+        pauseYouTube();
+        setPhase("post_song");
+      }
+    };
+  };
+
   const syncYouTubeToInstrumental = (force = false) => {
     const player = youtubePlayerRef.current;
-    const inst = instrumentalRef.current;
-    if (!player || !inst || typeof player.getCurrentTime !== "function") return;
-    const target = inst.currentTime || 0;
+    if (!player || typeof player.getCurrentTime !== "function") return;
+    const target = getPlaybackTime();
     try {
       const current = Number(player.getCurrentTime?.() || 0);
       const drift = Math.abs(current - target);
@@ -247,6 +361,16 @@ export default function Page() {
       // ignore sync errors
     }
   };
+
+  useEffect(() => {
+    return () => {
+      pauseWebAudio();
+      const ctx = audioContextRef.current;
+      if (ctx && ctx.state !== "closed") {
+        void ctx.close().catch(() => {});
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (phase !== "singing" || !youtubeOverlayId) {
@@ -364,7 +488,7 @@ export default function Page() {
   const currentLine = active >= 0 ? activeLyrics[active]?.text || "" : "";
   const nextLine = active >= 0 && active + 1 < activeLyrics.length ? activeLyrics[active + 1]?.text || "" : "";
   const firstLyricAt = activeLyrics.length > 0 ? activeLyrics[0].t : 0;
-  const nowTime = instrumentalRef.current?.currentTime || 0;
+  const nowTime = getPlaybackTime();
   const secondsUntilFirstLyric = Math.max(0, Math.ceil(firstLyricAt - nowTime));
 
   // Search YouTube
@@ -528,10 +652,14 @@ export default function Page() {
     playbackInitKeyRef.current = playbackKey;
 
     let cancelled = false;
-    let driftTimer: number | null = null;
 
     // fallback for local playlist (mp4 has audio)
     if (!instUrl) {
+      useHtmlAudioRef.current = true;
+      stopWebAudioSources();
+      isPlayingRef.current = false;
+      pausedAtRef.current = 0;
+      durationRef.current = 0;
       inst.src = `/karaoke/${encodeURIComponent(song.videoFile)}`;
       vox.src = "";
       inst.currentTime = 0;
@@ -553,46 +681,42 @@ export default function Page() {
       };
     }
 
-    inst.src = instUrl;
-    vox.src = voxUrl || "";
-    inst.currentTime = 0;
-    vox.currentTime = 0;
-
-    inst.volume = 1.0;
-    vox.volume = vocalGain;
-
+    useHtmlAudioRef.current = false;
+    inst.pause();
+    inst.removeAttribute("src");
+    vox.pause();
+    vox.removeAttribute("src");
     inst.load();
     vox.load();
 
     (async () => {
-      await Promise.all([waitCanPlayThrough(inst), voxUrl ? waitCanPlayThrough(vox) : Promise.resolve()]);
+      const ctx = await ensureAudioContext();
+      if (!ctx) return;
+      const [instRes, voxRes] = await Promise.all([
+        fetch(instUrl, { cache: "force-cache" }),
+        voxUrl ? fetch(voxUrl, { cache: "force-cache" }) : Promise.resolve(null),
+      ]);
+      if (!instRes.ok) throw new Error("failed to fetch instrumental");
+      if (voxUrl && voxRes && !voxRes.ok) throw new Error("failed to fetch vocals");
+
+      const instArray = await instRes.arrayBuffer();
+      const voxArray = voxRes ? await voxRes.arrayBuffer() : null;
       if (cancelled) return;
 
-      inst.currentTime = 0;
-      vox.currentTime = 0;
+      const instBuffer = await ctx.decodeAudioData(instArray.slice(0));
+      const voxBuffer = voxArray ? await ctx.decodeAudioData(voxArray.slice(0)) : null;
+      if (cancelled) return;
 
-      Promise.resolve().then(() => {
-        if (cancelled) return;
-        inst.play().catch(() => {});
-        if (voxUrl) vox.play().catch(() => {});
-        playYouTube();
-        syncYouTubeToInstrumental(true);
-      });
+      instrumentalBufferRef.current = instBuffer;
+      vocalsBufferRef.current = voxBuffer;
+      durationRef.current = instBuffer.duration;
+      pausedAtRef.current = 0;
 
-      const driftStart = performance.now();
-      driftTimer = window.setInterval(() => {
-        if (cancelled) return;
-        if (performance.now() - driftStart > 6000) {
-          if (driftTimer) window.clearInterval(driftTimer);
-          driftTimer = null;
-          return;
-        }
-        if (voxUrl && Math.abs((inst.currentTime || 0) - (vox.currentTime || 0)) > 0.015) {
-          vox.currentTime = inst.currentTime || 0;
-        }
-      }, 50);
-    })().catch(() => {
-      // ignore sync startup errors
+      await startWebAudio(0);
+      playYouTube();
+      syncYouTubeToInstrumental(true);
+    })().catch((error) => {
+      console.error("WebAudio startup failed:", error);
     });
 
     // YouTube songs use /api/lyrics captions path instead of local lrc.
@@ -607,15 +731,21 @@ export default function Page() {
 
     return () => {
       cancelled = true;
-      if (driftTimer) window.clearInterval(driftTimer);
+      if (!useHtmlAudioRef.current) {
+        pauseWebAudio();
+      }
     };
   }, [phase, song, jobStatus, youtubeOverlayId]);
 
   useEffect(() => {
     if (phase !== "singing" || !youtubeOverlayId) return;
     const id = window.setInterval(() => {
-      const inst = instrumentalRef.current;
-      if (!inst || inst.paused) return;
+      if (useHtmlAudioRef.current) {
+        const inst = instrumentalRef.current;
+        if (!inst || inst.paused) return;
+      } else if (!isPlayingRef.current) {
+        return;
+      }
       syncYouTubeToInstrumental(false);
     }, 800);
     return () => window.clearInterval(id);
@@ -701,6 +831,10 @@ export default function Page() {
 
   // Apply vocal volume live
   useEffect(() => {
+    const voxGain = vocalGainNodeRef.current;
+    if (voxGain) {
+      voxGain.gain.value = vocalGain;
+    }
     const vox = vocalsRef.current;
     if (!vox) return;
     vox.volume = vocalGain;
@@ -709,8 +843,6 @@ export default function Page() {
   // Highlight loop (lyrics clock source: instrumental audio currentTime)
   useEffect(() => {
     if (phase !== "singing") return;
-    const inst = instrumentalRef.current;
-    if (!inst) return;
 
     if (activeLyrics.length === 0) {
       setActive(-1);
@@ -719,7 +851,7 @@ export default function Page() {
 
     let raf = 0;
     const loop = () => {
-      setActive(findActiveLyricIndex(activeLyrics, inst.currentTime || 0));
+      setActive(findActiveLyricIndex(activeLyrics, getPlaybackTime()));
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -729,23 +861,35 @@ export default function Page() {
   // song end detection (source of truth: instrumental track)
   useEffect(() => {
     if (phase !== "singing") return;
-    const inst = instrumentalRef.current;
-    if (!inst) return;
-
-    const onEnded = () => {
-      inst.pause();
-      inst.currentTime = 0;
-      const vox = vocalsRef.current;
-      if (vox) {
-        vox.pause();
-        vox.currentTime = 0;
+    const id = window.setInterval(() => {
+      if (useHtmlAudioRef.current) {
+        const inst = instrumentalRef.current;
+        if (!inst) return;
+        if (!inst.paused && Number.isFinite(inst.duration) && inst.duration > 0 && inst.currentTime >= inst.duration - 0.05) {
+          inst.pause();
+          inst.currentTime = 0;
+          const vox = vocalsRef.current;
+          if (vox) {
+            vox.pause();
+            vox.currentTime = 0;
+          }
+          pauseYouTube();
+          setPhase("post_song");
+        }
+        return;
       }
-      pauseYouTube();
-      setPhase("post_song");
-    };
 
-    inst.addEventListener("ended", onEnded);
-    return () => inst.removeEventListener("ended", onEnded);
+      if (!isPlayingRef.current) return;
+      const d = durationRef.current;
+      if (d > 0 && getPlaybackTime() >= d - 0.05) {
+        isPlayingRef.current = false;
+        pausedAtRef.current = 0;
+        stopWebAudioSources();
+        pauseYouTube();
+        setPhase("post_song");
+      }
+    }, 120);
+    return () => window.clearInterval(id);
   }, [phase, song, jobStatus]);
 
   const hasSyncedLyrics = youtubeOverlayId && ytLyricsMode === "timed" && ytLyrics.length > 0;
@@ -788,6 +932,19 @@ export default function Page() {
   };
 
   const toggle = () => {
+    if (!useHtmlAudioRef.current) {
+      if (isPlayingRef.current) {
+        pauseWebAudio();
+        pauseYouTube();
+      } else {
+        void startWebAudio(pausedAtRef.current).then(() => {
+          playYouTube();
+          syncYouTubeToInstrumental(true);
+        });
+      }
+      return;
+    }
+
     const inst = instrumentalRef.current;
     const vox = vocalsRef.current;
     if (!inst || !vox) return;
@@ -832,6 +989,11 @@ export default function Page() {
     const vox = vocalsRef.current;
 
     try {
+      pauseWebAudio();
+      pausedAtRef.current = 0;
+      durationRef.current = 0;
+      instrumentalBufferRef.current = null;
+      vocalsBufferRef.current = null;
       inst?.pause();
       if (inst) inst.currentTime = 0;
       if (inst) inst.src = "";
@@ -864,6 +1026,7 @@ export default function Page() {
     setYoutubeOverlayId(null);
     setLyricsEnabled(true);
     playbackInitKeyRef.current = "";
+    useHtmlAudioRef.current = false;
     setPhase("browse");
   };
 
@@ -1400,6 +1563,8 @@ export default function Page() {
 
                 <button
                   onClick={() => {
+                    pauseWebAudio();
+                    pausedAtRef.current = 0;
                     const inst = instrumentalRef.current;
                     const vox = vocalsRef.current;
                     if (inst) {
