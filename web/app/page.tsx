@@ -230,6 +230,24 @@ export default function Page() {
     }
   };
 
+  const syncYouTubeToInstrumental = (force = false) => {
+    const player = youtubePlayerRef.current;
+    const inst = instrumentalRef.current;
+    if (!player || !inst || typeof player.getCurrentTime !== "function") return;
+    const target = inst.currentTime || 0;
+    try {
+      const current = Number(player.getCurrentTime?.() || 0);
+      const drift = Math.abs(current - target);
+      if (force || drift > 0.25) {
+        if (typeof player.seekTo === "function") {
+          player.seekTo(Math.max(0, target), true);
+        }
+      }
+    } catch {
+      // ignore sync errors
+    }
+  };
+
   useEffect(() => {
     if (phase !== "singing" || !youtubeOverlayId) {
       if (youtubePlayerRef.current && typeof youtubePlayerRef.current.destroy === "function") {
@@ -558,17 +576,18 @@ export default function Page() {
         inst.play().catch(() => {});
         if (voxUrl) vox.play().catch(() => {});
         playYouTube();
+        syncYouTubeToInstrumental(true);
       });
 
       const driftStart = performance.now();
       driftTimer = window.setInterval(() => {
         if (cancelled) return;
-        if (performance.now() - driftStart > 800) {
+        if (performance.now() - driftStart > 6000) {
           if (driftTimer) window.clearInterval(driftTimer);
           driftTimer = null;
           return;
         }
-        if (voxUrl && Math.abs((inst.currentTime || 0) - (vox.currentTime || 0)) > 0.03) {
+        if (voxUrl && Math.abs((inst.currentTime || 0) - (vox.currentTime || 0)) > 0.015) {
           vox.currentTime = inst.currentTime || 0;
         }
       }, 50);
@@ -591,6 +610,16 @@ export default function Page() {
       if (driftTimer) window.clearInterval(driftTimer);
     };
   }, [phase, song, jobStatus, youtubeOverlayId]);
+
+  useEffect(() => {
+    if (phase !== "singing" || !youtubeOverlayId) return;
+    const id = window.setInterval(() => {
+      const inst = instrumentalRef.current;
+      if (!inst || inst.paused) return;
+      syncYouTubeToInstrumental(false);
+    }, 800);
+    return () => window.clearInterval(id);
+  }, [phase, youtubeOverlayId]);
 
   useEffect(() => {
     if (phase !== "singing") {
@@ -768,6 +797,7 @@ export default function Page() {
         inst.play().catch(() => {});
         if (vox.src) vox.play().catch(() => {});
         playYouTube();
+        syncYouTubeToInstrumental(true);
       });
     } else {
       inst.pause();
