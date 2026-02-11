@@ -76,7 +76,7 @@ type LyricsCandidatesPayload = {
 const DEBUG_SEARCH = true;
 const TRACK_SYNC_OVERRIDES: Record<string, { audioOffsetSec?: number; lyricsOffsetSec?: number }> = {
   // Extreme - More Than Words (Official Music Video)
-  UrIiLvg58SY: { audioOffsetSec: -0.09, lyricsOffsetSec: 0.22 },
+  UrIiLvg58SY: { audioOffsetSec: -0.02, lyricsOffsetSec: 0.55 },
 };
 
 function decodeHtml(str: string): string {
@@ -646,7 +646,6 @@ export default function Page() {
     let cancelled = false;
     let driftTimer: number | null = null;
     let longDriftTimer: number | null = null;
-    let rateResetTimer: number | null = null;
 
     // fallback for local playlist (mp4 has audio)
     if (!instUrl) {
@@ -687,7 +686,8 @@ export default function Page() {
       await Promise.all([waitCanPlayThrough(inst), voxUrl ? waitCanPlayThrough(vox) : Promise.resolve()]);
       if (cancelled) return;
 
-      const estimatedOffsetSec = voxUrl ? await estimateInitialOffsetSec(instUrl, voxUrl) : 0;
+      const hasManualAudioOffset = typeof trackSyncOverride?.audioOffsetSec === "number";
+      const estimatedOffsetSec = hasManualAudioOffset ? 0 : voxUrl ? await estimateInitialOffsetSec(instUrl, voxUrl) : 0;
       const manualOffsetSec = trackSyncOverride?.audioOffsetSec || 0;
       const offsetSec = estimatedOffsetSec + manualOffsetSec;
       if (cancelled) return;
@@ -726,25 +726,10 @@ export default function Page() {
           const expected = (inst.currentTime || 0) + offsetSec;
           const delta = expected - (vox.currentTime || 0);
           const abs = Math.abs(delta);
-          if (abs > 0.04) {
-            vox.playbackRate = 1.0;
+          if (abs > 0.035) {
             vox.currentTime = Math.max(0, expected);
-            return;
           }
-          if (abs > 0.008) {
-            const nextRate = Math.max(0.995, Math.min(1.005, 1 + delta * 0.04));
-            vox.playbackRate = nextRate;
-            if (rateResetTimer) {
-              window.clearTimeout(rateResetTimer);
-            }
-            rateResetTimer = window.setTimeout(() => {
-              vox.playbackRate = 1.0;
-              rateResetTimer = null;
-            }, 450);
-          } else if (vox.playbackRate !== 1.0) {
-            vox.playbackRate = 1.0;
-          }
-        }, 2000);
+        }, 1200);
       }
     })().catch(() => {
       // ignore sync startup errors
@@ -764,7 +749,6 @@ export default function Page() {
       cancelled = true;
       if (driftTimer) window.clearInterval(driftTimer);
       if (longDriftTimer) window.clearInterval(longDriftTimer);
-      if (rateResetTimer) window.clearTimeout(rateResetTimer);
       vox.playbackRate = 1.0;
     };
   }, [phase, song, jobStatus, youtubeOverlayId, trackSyncOverride]);
