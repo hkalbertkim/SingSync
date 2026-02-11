@@ -1,38 +1,123 @@
-Create a GitHub Actions workflow that syncs GitHub activity to Linear.
+name: Linear Sync
 
-Repository: SingSync
-Linear Team ID: 949ab9f1-1504-422f-a646-18cf1ad57082
+on:
+  push:
+    branches:
+      - "feat/**"
+      - "fix/**"
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
 
-Assumptions:
-- GitHub Actions secrets will exist:
-  LINEAR_API_KEY
-  LINEAR_TEAM_ID
+jobs:
+  linear_sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Linear issue key (e.g., HKA-123)
+        id: key
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEXT=""
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TEXT="${{ github.ref_name }} ${{ github.event.head_commit.message }}"
+          else
+            TEXT="${{ github.head_ref }} ${{ github.event.pull_request.title }} ${{ github.event.pull_request.body }}"
+          fi
 
-Issue identification rule:
-- Extract Linear issue key from:
-  - branch name (e.g., feat/HKA-70-worker-stability)
-  - PR title/body
-  - commit message
-Pattern: /(HKA-\d+)/
+          echo "TEXT=$TEXT"
+          KEY="$(echo "$TEXT" | grep -Eo 'HKA-[0-9]+' | head -n1 || true)"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
 
-Behavior:
-1) On push to branches feat/*, fix/*:
-   - If an issue key found, add a Linear comment with latest commit URL and message.
-2) On pull_request opened/synchronize:
-   - Add a Linear comment with PR URL + title.
-3) On pull_request closed with merged=true:
-   - If base branch is develop: move issue to "In Review"
-   - If base branch is main: move issue to "Done"
+      - name: Stop if no Linear key found
+        if: steps.key.outputs.key == ''
+        run: |
+          echo "No Linear issue key found (pattern HKA-123). Skipping."
+          exit 0
 
-Implementation:
-- Add file .github/workflows/linear-sync.yml
-- Use curl to call Linear GraphQL API
-- In the workflow, query issue by identifier (e.g., HKA-70) to get issueId
-- Then commentCreate and issueUpdate as needed.
-- State IDs:
-  In Review: 459f2d74-eb9c-4d14-8cac-fcafafd8d678
-  Done: 8cc82b83-a7d6-4bb4-98bc-39b47e297644
+      - name: Resolve Linear issueId by identifier
+        id: issue
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_TEAM_ID: ${{ secrets.LINEAR_TEAM_ID }}
+          ISSUE_KEY: ${{ steps.key.outputs.key }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          QUERY='query($teamId:String!,$identifier:String!){ issue(teamId:$teamId, identifier:$identifier){ id identifier title url } }'
+          payload="$(jq -n --arg q "$QUERY" --arg teamId "$LINEAR_TEAM_ID" --arg identifier "$ISSUE_KEY" '{query:$q, variables:{teamId:$teamId, identifier:$identifier}}')"
 
-Deliverable:
-- Commit the workflow on develop branch (not main)
-- Show the final YAML file content.
+          resp="$(curl -sS https://api.linear.app/graphql \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $LINEAR_API_KEY" \
+            -d "$payload")"
+
+          issue_id="$(echo "$resp" | jq -r '.data.issue.id // empty')"
+          if [ -z "$issue_id" ]; then
+            echo "Could not resolve Linear issue for $ISSUE_KEY"
+            echo "$resp" | jq
+            exit 1
+          fi
+
+          echo "issue_id=$issue_id" >> "$GITHUB_OUTPUT"
+
+      - name: Add Linear comment (push)
+        if: github.event_name == 'push'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          ISSUE_ID: ${{ steps.issue.outputs.issue_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="New commit on ${{ github.ref_name }}:\n${{ github.event.head_commit.message }}\n${{ github.event.head_commit.url }}"
+          MUT='mutation($issueId:String!,$body:String!){ commentCreate(input:{issueId:$issueId, body:$body}){ success } }'
+          payload="$(jq -n --arg q "$MUT" --arg issueId "$ISSUE_ID" --arg body "$BODY" '{query:$q, variables:{issueId:$issueId, body:$body}}')"
+          curl -sS https://api.linear.app/graphql \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $LINEAR_API_KEY" \
+            -d "$payload" | jq
+
+      - name: Add Linear comment (PR opened/sync)
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          ISSUE_ID: ${{ steps.issue.outputs.issue_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY="PR update: ${{ github.event.pull_request.title }}\n${{ github.event.pull_request.html_url }}"
+          MUT='mutation($issueId:String!,$body:String!){ commentCreate(input:{issueId:$issueId, body:$body}){ success } }'
+          payload="$(jq -n --arg q "$MUT" --arg issueId "$ISSUE_ID" --arg body "$BODY" '{query:$q, variables:{issueId:$issueId, body:$body}}')"
+          curl -sS https://api.linear.app/graphql \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $LINEAR_API_KEY" \
+            -d "$payload" | jq
+
+      - name: Move Linear state on merge (develop -> In Review, main -> Done)
+        if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          ISSUE_ID: ${{ steps.issue.outputs.issue_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.ref }}"
+          # Team states (from earlier):
+          IN_REVIEW_ID="459f2d74-eb9c-4d14-8cac-fcafafd8d678"
+          DONE_ID="8cc82b83-a7d6-4bb4-98bc-39b47e297644"
+
+          STATE_ID=""
+          if [ "$BASE" = "develop" ]; then
+            STATE_ID="$IN_REVIEW_ID"
+          elif [ "$BASE" = "main" ]; then
+            STATE_ID="$DONE_ID"
+          else
+            echo "Base branch is $BASE; no state change."
+            exit 0
+          fi
+
+          MUT='mutation($id:String!,$stateId:String!){ issueUpdate(id:$id, input:{stateId:$stateId}){ success } }'
+          payload="$(jq -n --arg q "$MUT" --arg id "$ISSUE_ID" --arg stateId "$STATE_ID" '{query:$q, variables:{id:$id, stateId:$stateId}}')"
+          curl -sS https://api.linear.app/graphql \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $LINEAR_API_KEY" \
+            -d "$payload" | jq
