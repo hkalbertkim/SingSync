@@ -203,6 +203,9 @@ export default function Page() {
   const [communityVoteBusy, setCommunityVoteBusy] = useState(false);
   const [communityVoteHint, setCommunityVoteHint] = useState("");
   const [lyricsManualOffsetSec, setLyricsManualOffsetSec] = useState(0);
+  const [customLyricsUrl, setCustomLyricsUrl] = useState("");
+  const [customLyricsText, setCustomLyricsText] = useState("");
+  const [manualLyricsActive, setManualLyricsActive] = useState(false);
 
   // ad rotation dummy
   const [adIndex, setAdIndex] = useState(0);
@@ -544,6 +547,15 @@ export default function Page() {
     () => (youtubeOverlayId ? `singsync:lyrics:selected:${youtubeOverlayId}` : ""),
     [youtubeOverlayId],
   );
+  const lyricsContextId = useMemo(() => youtubeOverlayId || song?.id || "", [youtubeOverlayId, song?.id]);
+  const localUserLyricsKey = useMemo(
+    () => (lyricsContextId ? `singsync:lyrics:userpaste:${lyricsContextId}` : ""),
+    [lyricsContextId],
+  );
+  const localUserLyricsUrlKey = useMemo(
+    () => (lyricsContextId ? `singsync:lyrics:userurl:${lyricsContextId}` : ""),
+    [lyricsContextId],
+  );
   const localLyricsOffsetKey = useMemo(
     () =>
       youtubeOverlayId && selectedLyricCandidateId
@@ -557,6 +569,7 @@ export default function Page() {
   );
 
   useEffect(() => {
+    if (manualLyricsActive) return;
     const picked = selectedComparableCandidate || selectedLyricCandidate;
     if (!picked) return;
     const lines = Array.isArray(picked.lines)
@@ -568,7 +581,7 @@ export default function Page() {
     setYtLyricsSource(picked.source);
     setYtLyricsMode(picked.mode === "plain" ? "plain" : "timed");
     setYtPlainLyrics(typeof picked.plainLyrics === "string" ? picked.plainLyrics : "");
-  }, [selectedComparableCandidate, selectedLyricCandidate]);
+  }, [selectedComparableCandidate, selectedLyricCandidate, manualLyricsActive]);
 
   const activeLyrics = useMemo(() => {
     return youtubeOverlayId ? ytLyrics : lyrics;
@@ -850,6 +863,7 @@ export default function Page() {
       setCommunityBestId("");
       setCommunitySelectedId("");
       setCommunityVoteHint("");
+      setManualLyricsActive(false);
       return;
     }
 
@@ -859,6 +873,7 @@ export default function Page() {
     setYtLyricCandidates([]);
     setSelectedLyricCandidateId("");
     setCommunityVoteHint("");
+    setManualLyricsActive(false);
 
     fetch(apiUrl(`/api/lyrics?videoId=${encodeURIComponent(youtubeOverlayId)}`), {
       cache: "no-store",
@@ -925,6 +940,22 @@ export default function Page() {
     if (!vox) return;
     vox.volume = vocalGain;
   }, [vocalGain]);
+
+  useEffect(() => {
+    if (!localUserLyricsUrlKey) {
+      setCustomLyricsUrl("");
+      return;
+    }
+    setCustomLyricsUrl(getStoredChoice(localUserLyricsUrlKey));
+  }, [localUserLyricsUrlKey]);
+
+  useEffect(() => {
+    if (!localUserLyricsKey) {
+      setCustomLyricsText("");
+      return;
+    }
+    setCustomLyricsText(getStoredChoice(localUserLyricsKey));
+  }, [localUserLyricsKey]);
 
   useEffect(() => {
     if (!localLyricsCandidateKey || !selectedLyricCandidateId) return;
@@ -1039,6 +1070,30 @@ export default function Page() {
       setCommunityVoteHint("Vote failed. Try again.");
     } finally {
       setCommunityVoteBusy(false);
+    }
+  };
+
+  const applyManualLyrics = () => {
+    const text = customLyricsText.trim();
+    if (!text) return;
+
+    const looksTimed = /\[\d{1,2}:\d{2}(?:\.\d{1,2})?\]/.test(text);
+    if (looksTimed) {
+      const lines = parseLrc(text);
+      setYtLyrics(lines);
+      setYtLyricsMode("timed");
+      setYtPlainLyrics("");
+    } else {
+      setYtLyrics([]);
+      setYtLyricsMode("plain");
+      setYtPlainLyrics(text);
+    }
+    setYtLyricsSource("catalog");
+    setManualLyricsActive(true);
+
+    if (localUserLyricsKey) setStoredChoice(localUserLyricsKey, text);
+    if (localUserLyricsUrlKey && customLyricsUrl.trim()) {
+      setStoredChoice(localUserLyricsUrlKey, customLyricsUrl.trim());
     }
   };
 
@@ -1590,7 +1645,10 @@ export default function Page() {
                         return (
                           <button
                             key={`lyrics-compare-${candidate.id}`}
-                            onClick={() => setSelectedLyricCandidateId(candidate.id)}
+                            onClick={() => {
+                              setManualLyricsActive(false);
+                              setSelectedLyricCandidateId(candidate.id);
+                            }}
                             style={{
                               flex: selected ? 5 : 2,
                               minWidth: 0,
@@ -1682,6 +1740,118 @@ export default function Page() {
                     </div>
                   </div>
                 )}
+
+                <div
+                  style={{
+                    width: "100%",
+                    marginTop: 8,
+                    border: "1px solid #1f1f28",
+                    borderRadius: 10,
+                    background: "#0f0f15",
+                    padding: 10,
+                    display: "grid",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 12, opacity: 0.75 }}>
+                    If lyrics are wrong or out of sync, find better lyrics and copy & paste below.
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      value={customLyricsUrl}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setCustomLyricsUrl(next);
+                        if (localUserLyricsUrlKey) setStoredChoice(localUserLyricsUrlKey, next);
+                      }}
+                      placeholder="Lyrics URL (optional)"
+                      style={{
+                        flex: 1,
+                        height: 32,
+                        padding: "0 10px",
+                        borderRadius: 8,
+                        border: "1px solid #2a2a35",
+                        background: "#101018",
+                        color: "#f5f5f7",
+                        outline: "none",
+                        fontSize: 12,
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const url = customLyricsUrl.trim();
+                        if (!url) return;
+                        window.open(url, "_blank", "noopener,noreferrer");
+                      }}
+                      style={{
+                        height: 32,
+                        padding: "0 10px",
+                        borderRadius: 8,
+                        border: "1px solid #2a2a35",
+                        background: "#101018",
+                        color: "#f5f5f7",
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      Open
+                    </button>
+                  </div>
+                  <textarea
+                    value={customLyricsText}
+                    onChange={(e) => setCustomLyricsText(e.target.value)}
+                    placeholder="Paste lyrics here (plain text or LRC timestamps)"
+                    style={{
+                      minHeight: 90,
+                      borderRadius: 8,
+                      border: "1px solid #2a2a35",
+                      background: "#101018",
+                      color: "#f5f5f7",
+                      padding: 10,
+                      outline: "none",
+                      fontSize: 12,
+                      lineHeight: 1.4,
+                      resize: "vertical",
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                    <button
+                      onClick={applyManualLyrics}
+                      style={{
+                        height: 32,
+                        padding: "0 12px",
+                        borderRadius: 8,
+                        border: "1px solid #2a2a35",
+                        background: "#1a2b5a",
+                        color: "#f5f5f7",
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      Apply pasted lyrics
+                    </button>
+                    {manualLyricsActive && (
+                      <button
+                        onClick={() => setManualLyricsActive(false)}
+                        style={{
+                          height: 32,
+                          padding: "0 12px",
+                          borderRadius: 8,
+                          border: "1px solid #2a2a35",
+                          background: "#101018",
+                          color: "#f5f5f7",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                          fontSize: 12,
+                        }}
+                      >
+                        Use selected candidate
+                      </button>
+                    )}
+                  </div>
+                </div>
 
                 {youtubeOverlayId && !hasSyncedLyrics && (
                   <LyricsVotingPanel
