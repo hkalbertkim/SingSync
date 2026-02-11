@@ -1587,9 +1587,6 @@ export default function Page() {
                     <div style={{ display: "flex", gap: 8, width: "100%" }}>
                       {comparableLyricCandidates.map((candidate, idx) => {
                         const selected = selectedLyricCandidateId === candidate.id;
-                        const p = candidate.lines[0]?.text || " ";
-                        const c = candidate.lines[1]?.text || candidate.lines[0]?.text || " ";
-                        const n = candidate.lines[2]?.text || " ";
                         return (
                           <button
                             key={`lyrics-compare-${candidate.id}`}
@@ -1614,46 +1611,10 @@ export default function Page() {
                               {idx + 1}
                             </div>
                             <div style={{ fontSize: selected ? 13 : 11, opacity: 0.8, marginTop: 4 }}>
-                              {candidate.label}
+                              Lyrics Candidate {idx + 1}
                             </div>
-                            <div
-                              style={{
-                                marginTop: 8,
-                                fontSize: selected ? 15 : 12,
-                                fontWeight: selected ? 800 : 700,
-                                lineHeight: 1.35,
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}
-                            >
-                              {p}
-                            </div>
-                            <div
-                              style={{
-                                marginTop: 3,
-                                fontSize: selected ? 20 : 13,
-                                fontWeight: 900,
-                                lineHeight: 1.25,
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}
-                            >
-                              {c}
-                            </div>
-                            <div
-                              style={{
-                                marginTop: 3,
-                                fontSize: selected ? 15 : 12,
-                                fontWeight: selected ? 800 : 700,
-                                lineHeight: 1.35,
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}
-                            >
-                              {n}
+                            <div style={{ marginTop: 8, fontSize: selected ? 12 : 11, opacity: 0.72 }}>
+                              Source: {candidate.source}
                             </div>
                           </button>
                         );
@@ -1670,7 +1631,7 @@ export default function Page() {
                       }}
                     >
                       <button
-                        onClick={() => setLyricsManualOffsetSec((v) => Math.max(-6, Number((v - 0.2).toFixed(2))))}
+                        onClick={() => setLyricsManualOffsetSec((v) => Math.max(-6, Number((v - 0.5).toFixed(2))))}
                         style={{
                           height: 30,
                           padding: "0 10px",
@@ -1682,7 +1643,7 @@ export default function Page() {
                           cursor: "pointer",
                         }}
                       >
-                        Later (-0.2s)
+                        Later (0.5s)
                       </button>
                       <button
                         onClick={() => setLyricsManualOffsetSec(0)}
@@ -1700,7 +1661,7 @@ export default function Page() {
                         Reset
                       </button>
                       <button
-                        onClick={() => setLyricsManualOffsetSec((v) => Math.min(6, Number((v + 0.2).toFixed(2))))}
+                        onClick={() => setLyricsManualOffsetSec((v) => Math.min(6, Number((v + 0.5).toFixed(2))))}
                         style={{
                           height: 30,
                           padding: "0 10px",
@@ -1712,7 +1673,7 @@ export default function Page() {
                           cursor: "pointer",
                         }}
                       >
-                        Earlier (+0.2s)
+                        Earlier (0.5s)
                       </button>
                       <div style={{ fontSize: 12, opacity: 0.72 }}>
                         Current sync adjust: {lyricsManualOffsetSec > 0 ? "+" : ""}
