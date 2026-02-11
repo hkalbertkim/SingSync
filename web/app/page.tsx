@@ -1652,7 +1652,7 @@ export default function Page() {
                             style={{
                               flex: selected ? 5 : 2,
                               minWidth: 0,
-                              minHeight: selected ? 164 : 116,
+                              minHeight: 88,
                               borderRadius: 10,
                               border: "1px solid #2a2a35",
                               background: selected ? "#1f3168" : "#101018",
@@ -1665,13 +1665,10 @@ export default function Page() {
                               overflow: "hidden",
                             }}
                           >
-                            <div style={{ fontSize: selected ? 30 : 20, fontWeight: 900, lineHeight: 1 }}>
-                              {idx + 1}
+                            <div style={{ fontSize: selected ? 28 : 22, fontWeight: 900, lineHeight: 1 }}>
+                              Lyric {idx + 1}
                             </div>
-                            <div style={{ fontSize: selected ? 13 : 11, opacity: 0.8, marginTop: 4 }}>
-                              Lyrics Candidate {idx + 1}
-                            </div>
-                            <div style={{ marginTop: 8, fontSize: selected ? 12 : 11, opacity: 0.72 }}>
+                            <div style={{ marginTop: 10, fontSize: selected ? 12 : 11, opacity: 0.72 }}>
                               Source: {candidate.source}
                             </div>
                           </button>
