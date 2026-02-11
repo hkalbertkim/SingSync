@@ -370,7 +370,7 @@ export default function Page() {
     try {
       const current = Number(player.getCurrentTime?.() || 0);
       const drift = Math.abs(current - target);
-      if (force || drift > 0.25) {
+      if (force || drift > 1.2) {
         if (typeof player.seekTo === "function") {
           player.seekTo(Math.max(0, target), true);
         }
@@ -762,20 +762,6 @@ export default function Page() {
       }
     };
   }, [phase, song, jobStatus, youtubeOverlayId]);
-
-  useEffect(() => {
-    if (phase !== "singing" || !youtubeOverlayId) return;
-    const id = window.setInterval(() => {
-      if (useHtmlAudioRef.current) {
-        const inst = instrumentalRef.current;
-        if (!inst || inst.paused) return;
-      } else if (!isPlayingRef.current) {
-        return;
-      }
-      syncYouTubeToInstrumental(false);
-    }, 800);
-    return () => window.clearInterval(id);
-  }, [phase, youtubeOverlayId]);
 
   useEffect(() => {
     if (phase !== "singing") {
