@@ -409,5 +409,21 @@ Force regeneration:
 ./scripts/extract-line-timings.sh <videoId> --force
 ```
 
+## Sync Correction Event API (MVP)
+
+Submit a line timing correction event:
+
+```bash
+curl -X POST http://localhost:4000/sync/<videoId>/correct \
+  -H "Content-Type: application/json" \
+  -d '{"line_id":"line_12","new_start_ms":12345,"source":"user"}'
+```
+
+Apply a correction from CLI (without UI):
+
+```bash
+(cd server && npm exec tsx src/scripts/applyCorrection.ts <videoId> <line_id> <new_start_ms>)
+```
+
 
 (End of Document)

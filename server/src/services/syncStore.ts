@@ -17,6 +17,7 @@ export type SyncLineTiming = {
 export type SyncCorrectionEvent = {
   line_id: string;
   new_start_ms: number;
+  offset_ms?: number;
   created_at: string;
   source?: string;
 };
@@ -158,6 +159,7 @@ function normalizeSync(raw: unknown, videoId: string): SyncMetadataV1 {
             new_start_ms: Math.round(event.new_start_ms),
             created_at: event.created_at,
           };
+          if (isFiniteNumber(event.offset_ms)) normalized.offset_ms = event.offset_ms;
           if (typeof event.source === "string") normalized.source = event.source;
           return normalized;
         })

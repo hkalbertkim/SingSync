@@ -147,6 +147,9 @@
           "type": "number",
           "minimum": 0
         },
+        "offset_ms": {
+          "type": "number"
+        },
         "created_at": {
           "type": "string",
           "format": "date-time"
