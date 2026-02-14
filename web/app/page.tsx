@@ -83,9 +83,10 @@ type PendingCorrection = {
 const PENDING_CORRECTIONS_KEY = "singsync_pending_corrections_v1";
 const MAX_PENDING_CORRECTIONS = 50;
 const FLUSH_TIMEOUT_MS = 3000;
-const FLUSH_BACKOFF_STEPS_MS = [5000, 15000, 30000, 60000] as const;
+const backoffs = [5000, 15000, 30000, 60000] as const;
 
-let correctionFlushLock = false;
+let flushInFlight = false;
+let backoffIdx = 0;
 
 const DEBUG_SEARCH = true;
 
@@ -267,7 +268,6 @@ export default function Page() {
   const [savedCorrections, setSavedCorrections] = useState<PendingCorrection[]>([]);
   const [uploadedThisSession, setUploadedThisSession] = useState(false);
   const flushTimerRef = useRef<number | null>(null);
-  const flushRetryIndexRef = useRef(0);
 
   // ad rotation dummy
   const [adIndex, setAdIndex] = useState(0);
@@ -690,30 +690,20 @@ export default function Page() {
     }
 
     flushTimerRef.current = window.setTimeout(() => {
-      const run = () => {
-        void flushPendingCorrections();
-      };
-      const withIdle = window as Window & {
-        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-      };
-      if (typeof withIdle.requestIdleCallback === "function") {
-        withIdle.requestIdleCallback(run, { timeout: 1000 });
-      } else {
-        window.setTimeout(run, 0);
-      }
+      void flushPendingCorrections();
     }, Math.max(0, delayMs));
   };
 
   const flushPendingCorrections = async () => {
-    if (correctionFlushLock) return;
+    if (flushInFlight) return;
 
     const queue = readPendingCorrections();
     if (queue.length === 0) {
-      flushRetryIndexRef.current = 0;
+      backoffIdx = 0;
       return;
     }
 
-    correctionFlushLock = true;
+    flushInFlight = true;
     let sentCount = 0;
     let failedAt = -1;
 
@@ -765,22 +755,27 @@ export default function Page() {
       }
 
       if (failedAt >= 0) {
-        const idx = Math.min(flushRetryIndexRef.current, FLUSH_BACKOFF_STEPS_MS.length - 1);
-        const delay = FLUSH_BACKOFF_STEPS_MS[idx];
-        flushRetryIndexRef.current = Math.min(idx + 1, FLUSH_BACKOFF_STEPS_MS.length - 1);
+        const idx = Math.min(backoffIdx, backoffs.length - 1);
+        const delay = backoffs[idx];
+        backoffIdx = Math.min(idx + 1, backoffs.length - 1);
         scheduleCorrectionFlush(delay);
       } else {
-        flushRetryIndexRef.current = 0;
+        backoffIdx = 0;
       }
     } finally {
-      correctionFlushLock = false;
+      flushInFlight = false;
     }
   };
 
   useEffect(() => {
-    scheduleCorrectionFlush(0);
-    const delayed = window.setTimeout(() => scheduleCorrectionFlush(0), 30000);
+    const immediate = window.setTimeout(() => {
+      void flushPendingCorrections();
+    }, 0);
+    const delayed = window.setTimeout(() => {
+      void flushPendingCorrections();
+    }, 30000);
     return () => {
+      window.clearTimeout(immediate);
       window.clearTimeout(delayed);
       if (flushTimerRef.current != null) {
         window.clearTimeout(flushTimerRef.current);
