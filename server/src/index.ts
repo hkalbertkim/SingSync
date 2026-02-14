@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import searchRouter from "./routes/search.js";
 import prepareRouter from "./routes/prepare.js";
 import lyricsRouter from "./routes/lyrics.js";
+import syncRouter from "./routes/sync.js";
 
 const PORT = Number(process.env.PORT || 4000);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -142,6 +143,9 @@ app.use("/api/prepare", prepareRouter);
 
 // Lyrics endpoint (captions if available)
 app.use("/api/lyrics", lyricsRouter);
+
+// Sync correction endpoint
+app.use("/sync", syncRouter);
 
 // Serve cache files statically
 app.use("/cache", express.static("cache"));

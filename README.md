@@ -377,6 +377,53 @@ At no point does the agent:
 
 For details, see [`AGENT_RULES.md`](./AGENT_RULES.md).
 
+## Sync Marker Extraction (Cached Song)
+
+When a song is prepared, SingSync now writes sync metadata to:
+
+- `server/cache/<videoId>/sync.json`
+
+To (re)generate vocal onsets + phrase gaps for an already cached song:
+
+```bash
+./scripts/extract-sync-markers.sh <videoId>
+```
+
+Force re-extraction even if markers already exist:
+
+```bash
+./scripts/extract-sync-markers.sh <videoId> --force
+```
+
+## Rough Line Timings (Cached Song)
+
+Generate rough per-line timings from cached markers + lyrics:
+
+```bash
+./scripts/extract-line-timings.sh <videoId>
+```
+
+Force regeneration:
+
+```bash
+./scripts/extract-line-timings.sh <videoId> --force
+```
+
+## Sync Correction Event API (MVP)
+
+Submit a line timing correction event:
+
+```bash
+curl -X POST http://localhost:PORT/sync/<videoId>/correct \
+  -H "Content-Type: application/json" \
+  -d '{"line_id":"line_12","new_start_ms":12345,"source":"ui"}'
+```
+
+Apply a correction from CLI (without UI):
+
+```bash
+(cd server && npm exec tsx src/scripts/applyCorrection.ts <videoId> <line_id> <new_start_ms>)
+```
+
 
 (End of Document)
-
