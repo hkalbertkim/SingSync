@@ -206,6 +206,7 @@ export default function Page() {
   const [customLyricsUrl, setCustomLyricsUrl] = useState("");
   const [customLyricsText, setCustomLyricsText] = useState("");
   const [manualLyricsActive, setManualLyricsActive] = useState(false);
+  const [showSyncHelpPopover, setShowSyncHelpPopover] = useState(false);
 
   // ad rotation dummy
   const [adIndex, setAdIndex] = useState(0);
@@ -1636,6 +1637,115 @@ export default function Page() {
                   textAlign: "center",
                 }}
               >
+                {!lyricsEnabled ? (
+                  <div style={{ fontSize: 14, opacity: 0.7 }}>Lyrics are off.</div>
+                ) : ytLyricsLoading && youtubeOverlayId ? (
+                  <div style={{ fontSize: 14, opacity: 0.7 }}>Loading lyrics…</div>
+                ) : ytLyricsMode === "plain" && ytPlainLyrics.trim().length > 0 ? (
+                  <div
+                    style={{
+                      width: "100%",
+                      maxHeight: 260,
+                      overflow: "auto",
+                      textAlign: "left",
+                      whiteSpace: "pre-wrap",
+                      lineHeight: 1.5,
+                      fontSize: 20,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {ytPlainLyrics}
+                  </div>
+                ) : activeLyrics.length === 0 ? (
+                  <div style={{ fontSize: 14, opacity: 0.75 }}>
+                    {youtubeOverlayId && ytLyricsSource === "none"
+                      ? "No synced captions available. Try Lyrics 1/2/3 sources above."
+                      : "No lyrics available."}
+                  </div>
+                ) : active < 0 ? (
+                  <div style={{ width: "100%", display: "grid", gap: 10 }}>
+                    <div style={{ fontSize: 14, opacity: 0.7 }}>
+                      Lyrics start in about {secondsUntilFirstLyric}s
+                    </div>
+                    <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.3, opacity: 0.85 }}>
+                      {activeLyrics[0]?.text || "..."}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ width: "100%", display: "grid", gap: 10 }}>
+                    <div style={{ fontSize: 20, opacity: 0.45, minHeight: 28 }}>{prevLine || " "}</div>
+                    <div style={{ fontSize: 42, fontWeight: 900, lineHeight: 1.2, minHeight: 52 }}>
+                      {currentLine || "..."}
+                    </div>
+                    <div style={{ fontSize: 20, opacity: 0.45, minHeight: 28 }}>{nextLine || " "}</div>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    width: "100%",
+                    marginTop: 10,
+                    display: "grid",
+                    justifyItems: "end",
+                    gap: 8,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowSyncHelpPopover((v) => !v)}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "#8cb5ff",
+                      textDecoration: "underline",
+                      textUnderlineOffset: 2,
+                      fontSize: 12,
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    Is the lyrics timing off? Help us fix it.
+                  </button>
+                  {showSyncHelpPopover && (
+                    <div
+                      style={{
+                        width: "min(320px, 100%)",
+                        borderRadius: 10,
+                        border: "1px solid #2a2a35",
+                        background: "#121826",
+                        padding: 10,
+                        display: "grid",
+                        gap: 8,
+                        textAlign: "left",
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 800 }}>Help us sync the lyrics</div>
+                      <div style={{ fontSize: 12, opacity: 0.8 }}>
+                        Later we'll let you tap the exact start of a line.
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowSyncHelpPopover(false)}
+                          style={{
+                            height: 28,
+                            padding: "0 10px",
+                            borderRadius: 8,
+                            border: "1px solid #2a2a35",
+                            background: "#101018",
+                            color: "#f5f5f7",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            fontWeight: 700,
+                          }}
+                        >
+                          Got it
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {youtubeOverlayId && comparableLyricCandidates.length > 0 && (
                   <div style={{ width: "100%", display: "grid", gap: 10, marginBottom: 10 }}>
                     <div style={{ fontSize: 12, opacity: 0.7 }}>Lyrics candidates (pick best sync)</div>
@@ -1859,50 +1969,6 @@ export default function Page() {
                     voteBusy={communityVoteBusy}
                     voteHint={communityVoteHint}
                   />
-                )}
-
-                {!lyricsEnabled ? (
-                  <div style={{ fontSize: 14, opacity: 0.7 }}>Lyrics are off.</div>
-                ) : ytLyricsLoading && youtubeOverlayId ? (
-                  <div style={{ fontSize: 14, opacity: 0.7 }}>Loading lyrics…</div>
-                ) : ytLyricsMode === "plain" && ytPlainLyrics.trim().length > 0 ? (
-                  <div
-                    style={{
-                      width: "100%",
-                      maxHeight: 260,
-                      overflow: "auto",
-                      textAlign: "left",
-                      whiteSpace: "pre-wrap",
-                      lineHeight: 1.5,
-                      fontSize: 20,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {ytPlainLyrics}
-                  </div>
-                ) : activeLyrics.length === 0 ? (
-                  <div style={{ fontSize: 14, opacity: 0.75 }}>
-                    {youtubeOverlayId && ytLyricsSource === "none"
-                      ? "No synced captions available. Try Lyrics 1/2/3 sources above."
-                      : "No lyrics available."}
-                  </div>
-                ) : active < 0 ? (
-                  <div style={{ width: "100%", display: "grid", gap: 10 }}>
-                    <div style={{ fontSize: 14, opacity: 0.7 }}>
-                      Lyrics start in about {secondsUntilFirstLyric}s
-                    </div>
-                    <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.3, opacity: 0.85 }}>
-                      {activeLyrics[0]?.text || "..."}
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ width: "100%", display: "grid", gap: 10 }}>
-                    <div style={{ fontSize: 20, opacity: 0.45, minHeight: 28 }}>{prevLine || " "}</div>
-                    <div style={{ fontSize: 42, fontWeight: 900, lineHeight: 1.2, minHeight: 52 }}>
-                      {currentLine || "..."}
-                    </div>
-                    <div style={{ fontSize: 20, opacity: 0.45, minHeight: 28 }}>{nextLine || " "}</div>
-                  </div>
                 )}
               </div>
             </Card>
