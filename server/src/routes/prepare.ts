@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 
 import { downloadAudio } from "../services/downloader.js";
 import { separateVocals } from "../services/separator.js";
+import { ensureSync } from "../services/syncStore.js";
 
 const router = Router();
 
@@ -125,6 +126,13 @@ async function processVideo(jobId: string, videoId: string, title: string, chann
     jobs.set(jobId, { ...job });
 
     const separationResult = await separateVocals(videoId, downloadResult.audioPath);
+
+    // Step 3: Ensure sync metadata scaffold exists
+    job.progress = 80;
+    job.stage = "Initializing sync metadata";
+    jobs.set(jobId, { ...job });
+
+    ensureSync(videoId);
 
     // Save meta for activity list
     try {
