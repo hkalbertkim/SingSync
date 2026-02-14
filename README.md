@@ -395,5 +395,19 @@ Force re-extraction even if markers already exist:
 ./scripts/extract-sync-markers.sh <videoId> --force
 ```
 
+## Rough Line Timings (Cached Song)
+
+Generate rough per-line timings from cached markers + lyrics:
+
+```bash
+./scripts/extract-line-timings.sh <videoId>
+```
+
+Force regeneration:
+
+```bash
+./scripts/extract-line-timings.sh <videoId> --force
+```
+
 
 (End of Document)

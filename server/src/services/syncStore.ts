@@ -11,6 +11,7 @@ export type SyncLineTiming = {
   start_ms: number;
   end_ms: number;
   confidence: number;
+  derived_from: "markers" | "uniform";
 };
 
 export type SyncCorrectionEvent = {
@@ -37,6 +38,7 @@ export type SyncMetadataV1 = {
     extracted_at?: string;
   };
   alignment: {
+    mode: "rough" | "none";
     line_timings: SyncLineTiming[];
   };
   corrections: {
@@ -82,6 +84,7 @@ function emptySync(videoId: string): SyncMetadataV1 {
       phrase_gaps: [],
     },
     alignment: {
+      mode: "none",
       line_timings: [],
     },
     corrections: {
@@ -115,6 +118,8 @@ function normalizeSync(raw: unknown, videoId: string): SyncMetadataV1 {
   if (typeof rawMarkers.extracted_at === "string") markers.extracted_at = rawMarkers.extracted_at;
 
   const rawAlignment = (obj.alignment as Record<string, unknown> | undefined) || {};
+  const alignmentMode =
+    rawAlignment.mode === "rough" || rawAlignment.mode === "none" ? rawAlignment.mode : "none";
   const lineTimings: SyncLineTiming[] = Array.isArray(rawAlignment.line_timings)
     ? rawAlignment.line_timings
         .map((item) => {
@@ -124,11 +129,16 @@ function normalizeSync(raw: unknown, videoId: string): SyncMetadataV1 {
           if (!isFiniteNumber(line.start_ms) || line.start_ms < 0) return null;
           if (!isFiniteNumber(line.end_ms) || line.end_ms < 0) return null;
           if (!isFiniteNumber(line.confidence)) return null;
+          const derived_from =
+            line.derived_from === "markers" || line.derived_from === "uniform"
+              ? line.derived_from
+              : "uniform";
           return {
             line_id: line.line_id,
             start_ms: Math.round(line.start_ms),
             end_ms: Math.round(line.end_ms),
             confidence: Math.max(0, Math.min(1, line.confidence)),
+            derived_from,
           };
         })
         .filter((x): x is SyncLineTiming => x !== null)
@@ -174,6 +184,7 @@ function normalizeSync(raw: unknown, videoId: string): SyncMetadataV1 {
     updated_at: updatedAt,
     markers,
     alignment: {
+      mode: alignmentMode,
       line_timings: lineTimings,
     },
     corrections: {
@@ -243,6 +254,27 @@ export function writeMarkers(
     phrase_gaps: payload.phrase_gaps,
     source: payload.source ?? current.markers.source,
     extracted_at: payload.extracted_at ?? nowIso(),
+  };
+  return saveSync(videoId, current);
+}
+
+export function writeAlignment(
+  videoId: string,
+  payload: {
+    mode: "rough" | "none";
+    line_timings: SyncLineTiming[];
+  }
+): SyncMetadataV1 {
+  const current = loadSync(videoId);
+  current.alignment = {
+    mode: payload.mode,
+    line_timings: payload.line_timings.map((line) => ({
+      line_id: line.line_id,
+      start_ms: Math.max(0, Math.round(line.start_ms)),
+      end_ms: Math.max(0, Math.round(line.end_ms)),
+      confidence: Math.max(0, Math.min(1, line.confidence)),
+      derived_from: line.derived_from === "markers" ? "markers" : "uniform",
+    })),
   };
   return saveSync(videoId, current);
 }

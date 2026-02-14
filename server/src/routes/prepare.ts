@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import { downloadAudio } from "../services/downloader.js";
 import { separateVocals } from "../services/separator.js";
 import { ensureMarkersForVideo } from "../services/syncMarkers.js";
+import { generateAndPersistRoughLineTimings } from "../services/syncLineTiming.js";
 import { ensureSync } from "../services/syncStore.js";
 
 const router = Router();
@@ -135,6 +136,13 @@ async function processVideo(jobId: string, videoId: string, title: string, chann
 
     ensureSync(videoId);
     ensureMarkersForVideo(videoId, separationResult.vocalsPath);
+
+    // Step 4: Generate rough line timings (if lyrics cache exists)
+    job.progress = 90;
+    job.stage = "Generating rough lyric line timings";
+    jobs.set(jobId, { ...job });
+
+    generateAndPersistRoughLineTimings(videoId);
 
     // Save meta for activity list
     try {

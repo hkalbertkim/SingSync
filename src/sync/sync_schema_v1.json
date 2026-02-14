@@ -57,8 +57,12 @@
     },
     "alignment": {
       "type": "object",
-      "required": ["line_timings"],
+      "required": ["mode", "line_timings"],
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["rough", "none"]
+        },
         "line_timings": {
           "type": "array",
           "items": {
@@ -107,7 +111,7 @@
     },
     "lineTiming": {
       "type": "object",
-      "required": ["line_id", "start_ms", "end_ms", "confidence"],
+      "required": ["line_id", "start_ms", "end_ms", "confidence", "derived_from"],
       "properties": {
         "line_id": {
           "type": "string"
@@ -124,6 +128,10 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        },
+        "derived_from": {
+          "type": "string",
+          "enum": ["markers", "uniform"]
         }
       },
       "additionalProperties": false
