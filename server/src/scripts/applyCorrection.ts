@@ -1,4 +1,4 @@
-import { applySyncCorrection } from "../services/syncCorrections.js";
+import { applyCorrection } from "../services/syncCorrections.js";
 import { loadSync, syncPath } from "../services/syncStore.js";
 
 function usage(): void {
@@ -18,11 +18,7 @@ async function main(): Promise<void> {
   }
 
   const before = loadSync(videoId).alignment.line_timings.find((line) => line.line_id === lineId) || null;
-  const result = applySyncCorrection(videoId, {
-    line_id: lineId,
-    new_start_ms: newStartMs,
-    source: "cli",
-  });
+  const result = applyCorrection(videoId, lineId, newStartMs, "cli", "127.0.0.1");
   const after = loadSync(videoId).alignment.line_timings.find((line) => line.line_id === lineId) || null;
 
   console.log(
@@ -36,6 +32,8 @@ async function main(): Promise<void> {
         votes: result.votes,
         median_offset_ms: result.median_offset_ms,
         applied: result.applied,
+        updated_start_ms: result.updated_start_ms,
+        updated_end_ms: result.updated_end_ms,
       },
       null,
       2
