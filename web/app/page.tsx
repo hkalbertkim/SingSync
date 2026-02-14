@@ -72,6 +72,17 @@ type LyricsCandidatesPayload = {
   candidates: CommunityCandidate[];
 };
 
+type PendingCorrection = {
+  videoId: string;
+  line_id: string;
+  new_start_ms: number;
+  source: "ui";
+  ts: string;
+};
+
+const PENDING_CORRECTIONS_KEY = "singsync_pending_corrections_v1";
+const MAX_PENDING_CORRECTIONS = 50;
+
 const DEBUG_SEARCH = true;
 
 function decodeHtml(str: string): string {
@@ -104,6 +115,36 @@ function shiftLyricLines(lines: LyricLine[], offsetSec: number): LyricLine[] {
     t: Math.max(0, line.t + offsetSec),
     text: line.text,
   }));
+}
+
+function readPendingCorrections(): PendingCorrection[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PENDING_CORRECTIONS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as PendingCorrection[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item) =>
+        item &&
+        typeof item.videoId === "string" &&
+        typeof item.line_id === "string" &&
+        Number.isFinite(Number(item.new_start_ms)) &&
+        item.source === "ui" &&
+        typeof item.ts === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function appendPendingCorrection(record: PendingCorrection): PendingCorrection[] {
+  const next = [...readPendingCorrections(), record].slice(-MAX_PENDING_CORRECTIONS);
+  try {
+    window.localStorage.setItem(PENDING_CORRECTIONS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage failures
+  }
+  return next;
 }
 
 function Card(props: { children: React.ReactNode }) {
@@ -207,6 +248,9 @@ export default function Page() {
   const [customLyricsText, setCustomLyricsText] = useState("");
   const [manualLyricsActive, setManualLyricsActive] = useState(false);
   const [showSyncHelpPopover, setShowSyncHelpPopover] = useState(false);
+  const [syncHelpSaved, setSyncHelpSaved] = useState(false);
+  const [showSavedFixes, setShowSavedFixes] = useState(false);
+  const [savedCorrections, setSavedCorrections] = useState<PendingCorrection[]>([]);
 
   // ad rotation dummy
   const [adIndex, setAdIndex] = useState(0);
@@ -595,6 +639,31 @@ export default function Page() {
   const nowTime = getPlaybackTime();
   const lyricClock = nowTime + lyricsManualOffsetSec;
   const secondsUntilFirstLyric = Math.max(0, Math.ceil(firstLyricAt - lyricClock));
+  const currentLineId = active >= 0 ? `line_${active + 1}` : "";
+
+  const refreshSavedCorrections = () => {
+    setSavedCorrections(readPendingCorrections());
+  };
+
+  const handleTapToMarkLine = () => {
+    if (!currentLineId) return;
+    const videoId = youtubeOverlayId || song?.id || "";
+    if (!videoId) return;
+
+    const newStartMs = Math.max(0, Math.round((getPlaybackTime() + lyricsManualOffsetSec) * 1000));
+    const next = appendPendingCorrection({
+      videoId,
+      line_id: currentLineId,
+      new_start_ms: newStartMs,
+      source: "ui",
+      ts: new Date().toISOString(),
+    });
+
+    setSavedCorrections(next);
+    setSyncHelpSaved(true);
+    setShowSavedFixes(false);
+    window.setTimeout(() => setSyncHelpSaved(false), 1800);
+  };
 
   // Search YouTube
   const handleSearch = async () => {
@@ -1692,7 +1761,10 @@ export default function Page() {
                 >
                   <button
                     type="button"
-                    onClick={() => setShowSyncHelpPopover((v) => !v)}
+                    onClick={() => {
+                      setShowSyncHelpPopover((v) => !v);
+                      refreshSavedCorrections();
+                    }}
                     style={{
                       border: "none",
                       background: "transparent",
@@ -1723,6 +1795,59 @@ export default function Page() {
                       <div style={{ fontSize: 12, opacity: 0.8 }}>
                         Later we'll let you tap the exact start of a line.
                       </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={handleTapToMarkLine}
+                          disabled={!currentLineId}
+                          style={{
+                            height: 28,
+                            padding: "0 10px",
+                            borderRadius: 8,
+                            border: "1px solid #2a2a35",
+                            background: currentLineId ? "#1a2b5a" : "#101018",
+                            color: currentLineId ? "#f5f5f7" : "#7f7f92",
+                            cursor: currentLineId ? "pointer" : "not-allowed",
+                            fontSize: 12,
+                            fontWeight: 700,
+                          }}
+                        >
+                          Tap when this line starts
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowSavedFixes((v) => !v)}
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "#8cb5ff",
+                            textDecoration: "underline",
+                            textUnderlineOffset: 2,
+                            fontSize: 12,
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          View saved fixes ({savedCorrections.length})
+                        </button>
+                      </div>
+                      {syncHelpSaved && <div style={{ fontSize: 12, color: "#9bd39b" }}>Saved. Thank you!</div>}
+                      {showSavedFixes && (
+                        <div style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.85 }}>
+                          {savedCorrections.length === 0 ? (
+                            <div>No saved fixes yet.</div>
+                          ) : (
+                            savedCorrections
+                              .slice(-3)
+                              .reverse()
+                              .map((item, idx) => (
+                                <div key={`${item.ts}-${idx}`}>
+                                  {item.line_id} at {item.new_start_ms}ms
+                                </div>
+                              ))
+                          )}
+                        </div>
+                      )}
                       <div style={{ display: "flex", justifyContent: "flex-end" }}>
                         <button
                           type="button"
