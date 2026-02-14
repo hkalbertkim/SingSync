@@ -29,6 +29,7 @@ async function main(): Promise<void> {
         line_id: lineId,
         before,
         after,
+        baseline_start_ms: after?.baseline_start_ms ?? before?.baseline_start_ms ?? null,
         votes: result.votes,
         median_offset_ms: result.median_offset_ms,
         applied: result.applied,

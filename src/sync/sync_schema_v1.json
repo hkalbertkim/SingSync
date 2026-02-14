@@ -111,12 +111,16 @@
     },
     "lineTiming": {
       "type": "object",
-      "required": ["line_id", "start_ms", "end_ms", "confidence", "derived_from"],
+      "required": ["line_id", "start_ms", "baseline_start_ms", "end_ms", "confidence", "derived_from"],
       "properties": {
         "line_id": {
           "type": "string"
         },
         "start_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "baseline_start_ms": {
           "type": "number",
           "minimum": 0
         },

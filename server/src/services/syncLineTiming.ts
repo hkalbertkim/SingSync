@@ -200,6 +200,7 @@ function createUniformLineTimings(lines: string[], durationMs: number): SyncLine
     return {
       line_id: `line_${idx + 1}`,
       start_ms: startMs,
+      baseline_start_ms: startMs,
       end_ms: endMs,
       confidence: 0.15,
       derived_from: "uniform",
@@ -242,6 +243,7 @@ export function generateRoughLineTimings(
       timings.push({
         line_id: `line_${i + 1}`,
         start_ms: seg.startMs,
+        baseline_start_ms: seg.startMs,
         end_ms: Math.max(seg.startMs + 200, seg.endMs),
         confidence: segmentConfidence(seg, 1),
         derived_from: "markers",
@@ -275,6 +277,7 @@ export function generateRoughLineTimings(
       timings.push({
         line_id: `line_${lineCursor + 1}`,
         start_ms: startMs,
+        baseline_start_ms: startMs,
         end_ms: endMs,
         confidence: conf,
         derived_from: "markers",
@@ -289,6 +292,7 @@ export function generateRoughLineTimings(
     timings.push({
       line_id: `line_${lineCursor + 1}`,
       start_ms: lastEnd,
+      baseline_start_ms: lastEnd,
       end_ms: lastEnd + 500,
       confidence: 0.1,
       derived_from: "uniform",

@@ -9,6 +9,7 @@ export type SyncMarkerPoint = {
 export type SyncLineTiming = {
   line_id: string;
   start_ms: number;
+  baseline_start_ms: number;
   end_ms: number;
   confidence: number;
   derived_from: "markers" | "uniform";
@@ -130,6 +131,10 @@ function normalizeSync(raw: unknown, videoId: string): SyncMetadataV1 {
           if (!isFiniteNumber(line.start_ms) || line.start_ms < 0) return null;
           if (!isFiniteNumber(line.end_ms) || line.end_ms < 0) return null;
           if (!isFiniteNumber(line.confidence)) return null;
+          const baselineStart =
+            isFiniteNumber(line.baseline_start_ms) && line.baseline_start_ms >= 0
+              ? Math.round(line.baseline_start_ms)
+              : Math.round(line.start_ms);
           const derived_from =
             line.derived_from === "markers" || line.derived_from === "uniform"
               ? line.derived_from
@@ -137,6 +142,7 @@ function normalizeSync(raw: unknown, videoId: string): SyncMetadataV1 {
           return {
             line_id: line.line_id,
             start_ms: Math.round(line.start_ms),
+            baseline_start_ms: baselineStart,
             end_ms: Math.round(line.end_ms),
             confidence: Math.max(0, Math.min(1, line.confidence)),
             derived_from,
@@ -273,6 +279,12 @@ export function writeAlignment(
     line_timings: payload.line_timings.map((line) => ({
       line_id: line.line_id,
       start_ms: Math.max(0, Math.round(line.start_ms)),
+      baseline_start_ms: Math.max(
+        0,
+        Math.round(
+          Number.isFinite(line.baseline_start_ms) ? line.baseline_start_ms : line.start_ms
+        )
+      ),
       end_ms: Math.max(0, Math.round(line.end_ms)),
       confidence: Math.max(0, Math.min(1, line.confidence)),
       derived_from: line.derived_from === "markers" ? "markers" : "uniform",
