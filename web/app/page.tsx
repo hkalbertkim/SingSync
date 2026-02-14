@@ -82,6 +82,11 @@ type PendingCorrection = {
 
 const PENDING_CORRECTIONS_KEY = "singsync_pending_corrections_v1";
 const MAX_PENDING_CORRECTIONS = 50;
+const FLUSH_TIMEOUT_MS = 3000;
+const backoffs = [5000, 15000, 30000, 60000] as const;
+
+let flushInFlight = false;
+let backoffIdx = 0;
 
 const DEBUG_SEARCH = true;
 
@@ -139,6 +144,16 @@ function readPendingCorrections(): PendingCorrection[] {
 
 function appendPendingCorrection(record: PendingCorrection): PendingCorrection[] {
   const next = [...readPendingCorrections(), record].slice(-MAX_PENDING_CORRECTIONS);
+  try {
+    window.localStorage.setItem(PENDING_CORRECTIONS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage failures
+  }
+  return next;
+}
+
+function writePendingCorrections(records: PendingCorrection[]): PendingCorrection[] {
+  const next = records.slice(-MAX_PENDING_CORRECTIONS);
   try {
     window.localStorage.setItem(PENDING_CORRECTIONS_KEY, JSON.stringify(next));
   } catch {
@@ -251,6 +266,8 @@ export default function Page() {
   const [syncHelpSaved, setSyncHelpSaved] = useState(false);
   const [showSavedFixes, setShowSavedFixes] = useState(false);
   const [savedCorrections, setSavedCorrections] = useState<PendingCorrection[]>([]);
+  const [uploadedThisSession, setUploadedThisSession] = useState(false);
+  const flushTimerRef = useRef<number | null>(null);
 
   // ad rotation dummy
   const [adIndex, setAdIndex] = useState(0);
@@ -664,6 +681,112 @@ export default function Page() {
     setShowSavedFixes(false);
     window.setTimeout(() => setSyncHelpSaved(false), 1800);
   };
+
+  const scheduleCorrectionFlush = (delayMs: number) => {
+    if (typeof window === "undefined") return;
+    if (flushTimerRef.current != null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+
+    flushTimerRef.current = window.setTimeout(() => {
+      void flushPendingCorrections();
+    }, Math.max(0, delayMs));
+  };
+
+  const flushPendingCorrections = async () => {
+    if (flushInFlight) return;
+
+    const queue = readPendingCorrections();
+    if (queue.length === 0) {
+      backoffIdx = 0;
+      return;
+    }
+
+    flushInFlight = true;
+    let sentCount = 0;
+    let failedAt = -1;
+
+    try {
+      for (let i = 0; i < queue.length; i += 1) {
+        const item = queue[i];
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), FLUSH_TIMEOUT_MS);
+
+        try {
+          const res = await fetch(apiUrl(`/sync/${encodeURIComponent(item.videoId)}/correct`), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              line_id: item.line_id,
+              new_start_ms: item.new_start_ms,
+              source: item.source || "ui",
+            }),
+            keepalive: true,
+            signal: controller.signal,
+          });
+          window.clearTimeout(timeoutId);
+
+          if (!res.ok) {
+            failedAt = i;
+            break;
+          }
+
+          const data = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+          if (!data || data.ok !== true) {
+            failedAt = i;
+            break;
+          }
+
+          sentCount += 1;
+        } catch {
+          window.clearTimeout(timeoutId);
+          failedAt = i;
+          break;
+        }
+      }
+
+      const unsent = failedAt < 0 ? [] : queue.slice(failedAt);
+      const next = writePendingCorrections(unsent);
+      setSavedCorrections(next);
+
+      if (sentCount > 0) {
+        setUploadedThisSession(true);
+      }
+
+      if (failedAt >= 0) {
+        const idx = Math.min(backoffIdx, backoffs.length - 1);
+        const delay = backoffs[idx];
+        backoffIdx = Math.min(idx + 1, backoffs.length - 1);
+        scheduleCorrectionFlush(delay);
+      } else {
+        backoffIdx = 0;
+      }
+    } finally {
+      flushInFlight = false;
+    }
+  };
+
+  useEffect(() => {
+    const immediate = window.setTimeout(() => {
+      void flushPendingCorrections();
+    }, 0);
+    const delayed = window.setTimeout(() => {
+      void flushPendingCorrections();
+    }, 30000);
+    return () => {
+      window.clearTimeout(immediate);
+      window.clearTimeout(delayed);
+      if (flushTimerRef.current != null) {
+        window.clearTimeout(flushTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (phase !== "singing") return;
+    scheduleCorrectionFlush(0);
+  }, [phase]);
 
   // Search YouTube
   const handleSearch = async () => {
@@ -1794,6 +1917,10 @@ export default function Page() {
                       <div style={{ fontSize: 13, fontWeight: 800 }}>Help us sync the lyrics</div>
                       <div style={{ fontSize: 12, opacity: 0.8 }}>
                         Later we'll let you tap the exact start of a line.
+                      </div>
+                      <div style={{ fontSize: 12, opacity: 0.78 }}>
+                        Saved locally.
+                        {uploadedThisSession ? " Uploaded." : ""}
                       </div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         <button
