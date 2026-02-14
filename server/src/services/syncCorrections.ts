@@ -1,23 +1,18 @@
 import { loadSync, saveSync, type SyncCorrectionEvent, type SyncLineTiming } from "./syncStore.js";
 
-export class SyncCorrectionError extends Error {
-  code: "line_id_not_found";
-
-  constructor(code: "line_id_not_found", message: string) {
-    super(message);
-    this.code = code;
-  }
-}
+export type ApplyCorrectionInput = {
+  line_id: string;
+  new_start_ms: number;
+  source?: string;
+};
 
 export type ApplyCorrectionResult = {
-  ok: true;
   videoId: string;
   line_id: string;
   votes: number;
   median_offset_ms: number;
   applied: boolean;
-  updated_start_ms: number;
-  updated_end_ms: number;
+  line_timing: SyncLineTiming;
 };
 
 const MIN_VOTES = 2;
@@ -38,81 +33,60 @@ function findLineIndex(lineTimings: SyncLineTiming[], lineId: string): number {
   return lineTimings.findIndex((line) => line.line_id === lineId);
 }
 
-export function applyCorrection(
-  videoId: string,
-  lineId: string,
-  newStartMs: number,
-  source = "ui",
-  _ip = ""
-): ApplyCorrectionResult {
+export function applySyncCorrection(videoId: string, input: ApplyCorrectionInput): ApplyCorrectionResult {
   const sync = loadSync(videoId);
-  const lineIdx = findLineIndex(sync.alignment.line_timings, lineId);
+  const lineIdx = findLineIndex(sync.alignment.line_timings, input.line_id);
 
   if (lineIdx < 0) {
-    throw new SyncCorrectionError("line_id_not_found", `line_id not found in alignment: ${lineId}`);
+    throw new Error(`line_id not found in alignment: ${input.line_id}`);
   }
 
   const line = sync.alignment.line_timings[lineIdx];
-  const baselineStartMs = Number.isFinite(line.baseline_start_ms)
-    ? clampMs(line.baseline_start_ms)
-    : clampMs(line.start_ms);
-  if (!Number.isFinite(line.baseline_start_ms)) {
-    // Backfill baseline lazily for older sync.json files.
-    sync.alignment.line_timings[lineIdx] = {
-      ...line,
-      baseline_start_ms: baselineStartMs,
-    };
-  }
-  const targetStartMs = clampMs(newStartMs);
-  const offsetMs = targetStartMs - baselineStartMs;
+  const targetStartMs = clampMs(input.new_start_ms);
+  const offsetMs = targetStartMs - line.start_ms;
 
   const nextEvent: SyncCorrectionEvent = {
-    line_id: lineId,
+    line_id: input.line_id,
     new_start_ms: targetStartMs,
     offset_ms: offsetMs,
     created_at: new Date().toISOString(),
-    source,
+    source: input.source || "user",
   };
   sync.corrections.events.push(nextEvent);
 
-  const lineEvents = sync.corrections.events.filter((event) => event.line_id === lineId);
-  const offsets = lineEvents
-    .map((event) => clampMs(event.new_start_ms) - baselineStartMs)
-    .filter((offset) => Number.isFinite(offset));
+  const lineEvents = sync.corrections.events.filter(
+    (event) => event.line_id === input.line_id && Number.isFinite(event.offset_ms)
+  );
+  const offsets = lineEvents.map((event) => event.offset_ms as number);
   const votes = lineEvents.length;
   const medianOffset = median(offsets);
 
-  sync.corrections.aggregates[lineId] = {
+  sync.corrections.aggregates[input.line_id] = {
     median_offset_ms: medianOffset,
     votes,
   };
 
   let applied = false;
   if (votes >= MIN_VOTES) {
-    const updatedStart = clampMs(baselineStartMs + medianOffset);
+    const updatedStart = clampMs(line.start_ms + medianOffset);
     const minEnd = updatedStart + 200;
-    const currentLine = sync.alignment.line_timings[lineIdx];
 
     sync.alignment.line_timings[lineIdx] = {
-      ...currentLine,
-      baseline_start_ms: baselineStartMs,
+      ...line,
       start_ms: updatedStart,
-      end_ms: Math.max(currentLine.end_ms, minEnd),
+      end_ms: Math.max(line.end_ms, minEnd),
     };
 
     applied = true;
   }
 
   const saved = saveSync(videoId, sync);
-  const updated = saved.alignment.line_timings[lineIdx];
   return {
-    ok: true,
     videoId,
-    line_id: lineId,
+    line_id: input.line_id,
     votes,
     median_offset_ms: medianOffset,
     applied,
-    updated_start_ms: updated.start_ms,
-    updated_end_ms: updated.end_ms,
+    line_timing: saved.alignment.line_timings[lineIdx],
   };
 }

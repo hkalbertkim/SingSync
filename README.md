@@ -414,9 +414,9 @@ Force regeneration:
 Submit a line timing correction event:
 
 ```bash
-curl -X POST http://localhost:PORT/sync/<videoId>/correct \
+curl -X POST http://localhost:4000/sync/<videoId>/correct \
   -H "Content-Type: application/json" \
-  -d '{"line_id":"line_12","new_start_ms":12345,"source":"ui"}'
+  -d '{"line_id":"line_12","new_start_ms":12345,"source":"user"}'
 ```
 
 Apply a correction from CLI (without UI):
