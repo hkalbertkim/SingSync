@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 
 import { downloadAudio } from "../services/downloader.js";
 import { separateVocals } from "../services/separator.js";
+import { ensureMarkersForVideo } from "../services/syncMarkers.js";
 import { ensureSync } from "../services/syncStore.js";
 
 const router = Router();
@@ -127,12 +128,13 @@ async function processVideo(jobId: string, videoId: string, title: string, chann
 
     const separationResult = await separateVocals(videoId, downloadResult.audioPath);
 
-    // Step 3: Ensure sync metadata scaffold exists
+    // Step 3: Ensure sync metadata and derive initial markers
     job.progress = 80;
-    job.stage = "Initializing sync metadata";
+    job.stage = "Extracting vocal timing markers";
     jobs.set(jobId, { ...job });
 
     ensureSync(videoId);
+    ensureMarkersForVideo(videoId, separationResult.vocalsPath);
 
     // Save meta for activity list
     try {
