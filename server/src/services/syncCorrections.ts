@@ -53,8 +53,18 @@ export function applyCorrection(
   }
 
   const line = sync.alignment.line_timings[lineIdx];
+  const baselineStartMs = Number.isFinite(line.baseline_start_ms)
+    ? clampMs(line.baseline_start_ms)
+    : clampMs(line.start_ms);
+  if (!Number.isFinite(line.baseline_start_ms)) {
+    // Backfill baseline lazily for older sync.json files.
+    sync.alignment.line_timings[lineIdx] = {
+      ...line,
+      baseline_start_ms: baselineStartMs,
+    };
+  }
   const targetStartMs = clampMs(newStartMs);
-  const offsetMs = targetStartMs - line.start_ms;
+  const offsetMs = targetStartMs - baselineStartMs;
 
   const nextEvent: SyncCorrectionEvent = {
     line_id: lineId,
@@ -65,10 +75,10 @@ export function applyCorrection(
   };
   sync.corrections.events.push(nextEvent);
 
-  const lineEvents = sync.corrections.events.filter(
-    (event) => event.line_id === lineId && Number.isFinite(event.offset_ms)
-  );
-  const offsets = lineEvents.map((event) => event.offset_ms as number);
+  const lineEvents = sync.corrections.events.filter((event) => event.line_id === lineId);
+  const offsets = lineEvents
+    .map((event) => clampMs(event.new_start_ms) - baselineStartMs)
+    .filter((offset) => Number.isFinite(offset));
   const votes = lineEvents.length;
   const medianOffset = median(offsets);
 
@@ -79,13 +89,15 @@ export function applyCorrection(
 
   let applied = false;
   if (votes >= MIN_VOTES) {
-    const updatedStart = clampMs(line.start_ms + medianOffset);
+    const updatedStart = clampMs(baselineStartMs + medianOffset);
     const minEnd = updatedStart + 200;
+    const currentLine = sync.alignment.line_timings[lineIdx];
 
     sync.alignment.line_timings[lineIdx] = {
-      ...line,
+      ...currentLine,
+      baseline_start_ms: baselineStartMs,
       start_ms: updatedStart,
-      end_ms: Math.max(line.end_ms, minEnd),
+      end_ms: Math.max(currentLine.end_ms, minEnd),
     };
 
     applied = true;
